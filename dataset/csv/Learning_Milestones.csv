@@ -1,0 +1,451 @@
+milestone_id,employee_id,course,due_day,status
+LRN-30001,EMP7000,Security Awareness,Day 7,Completed
+LRN-30002,EMP7000,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30003,EMP7000,Role-Specific Certification,Day 60,Completed
+LRN-30004,EMP7001,Security Awareness,Day 7,In Progress
+LRN-30005,EMP7001,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30006,EMP7001,Role-Specific Certification,Day 60,Completed
+LRN-30007,EMP7002,Security Awareness,Day 7,Not Started
+LRN-30008,EMP7002,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30009,EMP7002,Compliance Refresher,Day 60,Completed
+LRN-30010,EMP7003,Security Awareness,Day 7,In Progress
+LRN-30011,EMP7003,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30012,EMP7003,Role-Specific Certification,Day 60,Completed
+LRN-30013,EMP7004,Code of Conduct,Day 7,In Progress
+LRN-30014,EMP7004,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30015,EMP7004,Compliance Refresher,Day 60,Completed
+LRN-30016,EMP7005,Security Awareness,Day 7,Completed
+LRN-30017,EMP7005,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30018,EMP7005,Role-Specific Certification,Day 60,Completed
+LRN-30019,EMP7006,Security Awareness,Day 7,Completed
+LRN-30020,EMP7006,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30021,EMP7006,Compliance Refresher,Day 60,Completed
+LRN-30022,EMP7007,Code of Conduct,Day 7,Not Started
+LRN-30023,EMP7007,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30024,EMP7007,Role-Specific Certification,Day 60,Completed
+LRN-30025,EMP7008,Security Awareness,Day 7,Completed
+LRN-30026,EMP7008,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30027,EMP7008,Compliance Refresher,Day 60,Completed
+LRN-30028,EMP7009,Security Awareness,Day 7,Completed
+LRN-30029,EMP7009,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30030,EMP7009,Role-Specific Certification,Day 60,Completed
+LRN-30031,EMP7010,Security Awareness,Day 7,Not Started
+LRN-30032,EMP7010,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30033,EMP7010,Compliance Refresher,Day 60,Completed
+LRN-30034,EMP7011,Code of Conduct,Day 7,Completed
+LRN-30035,EMP7011,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30036,EMP7011,Role-Specific Certification,Day 60,Not Started
+LRN-30037,EMP7012,Code of Conduct,Day 7,Completed
+LRN-30038,EMP7012,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30039,EMP7012,Compliance Refresher,Day 60,Not Started
+LRN-30040,EMP7013,Security Awareness,Day 7,In Progress
+LRN-30041,EMP7013,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30042,EMP7013,Compliance Refresher,Day 60,Not Started
+LRN-30043,EMP7014,Code of Conduct,Day 7,Completed
+LRN-30044,EMP7014,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30045,EMP7014,Role-Specific Certification,Day 60,Not Started
+LRN-30046,EMP7015,Security Awareness,Day 7,In Progress
+LRN-30047,EMP7015,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30048,EMP7015,Role-Specific Certification,Day 60,In Progress
+LRN-30049,EMP7016,Code of Conduct,Day 7,In Progress
+LRN-30050,EMP7016,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30051,EMP7016,Compliance Refresher,Day 60,Completed
+LRN-30052,EMP7017,Code of Conduct,Day 7,In Progress
+LRN-30053,EMP7017,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30054,EMP7017,Role-Specific Certification,Day 60,Completed
+LRN-30055,EMP7018,Security Awareness,Day 7,Completed
+LRN-30056,EMP7018,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30057,EMP7018,Role-Specific Certification,Day 60,Completed
+LRN-30058,EMP7019,Security Awareness,Day 7,Not Started
+LRN-30059,EMP7019,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30060,EMP7019,Compliance Refresher,Day 60,Completed
+LRN-30061,EMP7020,Security Awareness,Day 7,In Progress
+LRN-30062,EMP7020,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30063,EMP7020,Role-Specific Certification,Day 60,In Progress
+LRN-30064,EMP7021,Code of Conduct,Day 7,Not Started
+LRN-30065,EMP7021,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30066,EMP7021,Role-Specific Certification,Day 60,Completed
+LRN-30067,EMP7022,Code of Conduct,Day 7,In Progress
+LRN-30068,EMP7022,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30069,EMP7022,Compliance Refresher,Day 60,In Progress
+LRN-30070,EMP7023,Code of Conduct,Day 7,In Progress
+LRN-30071,EMP7023,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30072,EMP7023,Role-Specific Certification,Day 60,Not Started
+LRN-30073,EMP7024,Code of Conduct,Day 7,Not Started
+LRN-30074,EMP7024,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30075,EMP7024,Compliance Refresher,Day 60,In Progress
+LRN-30076,EMP7025,Security Awareness,Day 7,Completed
+LRN-30077,EMP7025,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30078,EMP7025,Compliance Refresher,Day 60,Completed
+LRN-30079,EMP7026,Security Awareness,Day 7,Completed
+LRN-30080,EMP7026,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30081,EMP7026,Compliance Refresher,Day 60,Not Started
+LRN-30082,EMP7027,Code of Conduct,Day 7,Completed
+LRN-30083,EMP7027,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30084,EMP7027,Compliance Refresher,Day 60,Not Started
+LRN-30085,EMP7028,Security Awareness,Day 7,In Progress
+LRN-30086,EMP7028,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30087,EMP7028,Compliance Refresher,Day 60,Completed
+LRN-30088,EMP7029,Security Awareness,Day 7,Completed
+LRN-30089,EMP7029,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30090,EMP7029,Compliance Refresher,Day 60,Completed
+LRN-30091,EMP7030,Security Awareness,Day 7,Completed
+LRN-30092,EMP7030,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30093,EMP7030,Compliance Refresher,Day 60,Completed
+LRN-30094,EMP7031,Code of Conduct,Day 7,Completed
+LRN-30095,EMP7031,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30096,EMP7031,Compliance Refresher,Day 60,Completed
+LRN-30097,EMP7032,Code of Conduct,Day 7,Completed
+LRN-30098,EMP7032,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30099,EMP7032,Compliance Refresher,Day 60,Completed
+LRN-30100,EMP7033,Code of Conduct,Day 7,Not Started
+LRN-30101,EMP7033,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30102,EMP7033,Role-Specific Certification,Day 60,In Progress
+LRN-30103,EMP7034,Security Awareness,Day 7,Not Started
+LRN-30104,EMP7034,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30105,EMP7034,Role-Specific Certification,Day 60,Completed
+LRN-30106,EMP7035,Code of Conduct,Day 7,Not Started
+LRN-30107,EMP7035,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30108,EMP7035,Role-Specific Certification,Day 60,Completed
+LRN-30109,EMP7036,Code of Conduct,Day 7,Not Started
+LRN-30110,EMP7036,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30111,EMP7036,Role-Specific Certification,Day 60,Not Started
+LRN-30112,EMP7037,Code of Conduct,Day 7,Not Started
+LRN-30113,EMP7037,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30114,EMP7037,Compliance Refresher,Day 60,Completed
+LRN-30115,EMP7038,Security Awareness,Day 7,Completed
+LRN-30116,EMP7038,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30117,EMP7038,Role-Specific Certification,Day 60,Completed
+LRN-30118,EMP7039,Code of Conduct,Day 7,In Progress
+LRN-30119,EMP7039,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30120,EMP7039,Role-Specific Certification,Day 60,In Progress
+LRN-30121,EMP7040,Security Awareness,Day 7,Not Started
+LRN-30122,EMP7040,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30123,EMP7040,Compliance Refresher,Day 60,Completed
+LRN-30124,EMP7041,Code of Conduct,Day 7,Completed
+LRN-30125,EMP7041,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30126,EMP7041,Compliance Refresher,Day 60,In Progress
+LRN-30127,EMP7042,Security Awareness,Day 7,Completed
+LRN-30128,EMP7042,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30129,EMP7042,Compliance Refresher,Day 60,Completed
+LRN-30130,EMP7043,Security Awareness,Day 7,Not Started
+LRN-30131,EMP7043,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30132,EMP7043,Compliance Refresher,Day 60,Completed
+LRN-30133,EMP7044,Security Awareness,Day 7,Completed
+LRN-30134,EMP7044,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30135,EMP7044,Role-Specific Certification,Day 60,Completed
+LRN-30136,EMP7045,Security Awareness,Day 7,In Progress
+LRN-30137,EMP7045,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30138,EMP7045,Role-Specific Certification,Day 60,Completed
+LRN-30139,EMP7046,Code of Conduct,Day 7,Completed
+LRN-30140,EMP7046,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30141,EMP7046,Compliance Refresher,Day 60,Completed
+LRN-30142,EMP7047,Security Awareness,Day 7,Completed
+LRN-30143,EMP7047,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30144,EMP7047,Role-Specific Certification,Day 60,Completed
+LRN-30145,EMP7048,Security Awareness,Day 7,In Progress
+LRN-30146,EMP7048,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30147,EMP7048,Compliance Refresher,Day 60,Completed
+LRN-30148,EMP7049,Code of Conduct,Day 7,Completed
+LRN-30149,EMP7049,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30150,EMP7049,Compliance Refresher,Day 60,In Progress
+LRN-30151,EMP7050,Code of Conduct,Day 7,Completed
+LRN-30152,EMP7050,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30153,EMP7050,Compliance Refresher,Day 60,In Progress
+LRN-30154,EMP7051,Security Awareness,Day 7,Completed
+LRN-30155,EMP7051,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30156,EMP7051,Role-Specific Certification,Day 60,Completed
+LRN-30157,EMP7052,Security Awareness,Day 7,Completed
+LRN-30158,EMP7052,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30159,EMP7052,Compliance Refresher,Day 60,In Progress
+LRN-30160,EMP7053,Security Awareness,Day 7,Completed
+LRN-30161,EMP7053,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30162,EMP7053,Role-Specific Certification,Day 60,Completed
+LRN-30163,EMP7054,Security Awareness,Day 7,Not Started
+LRN-30164,EMP7054,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30165,EMP7054,Compliance Refresher,Day 60,Completed
+LRN-30166,EMP7055,Security Awareness,Day 7,Completed
+LRN-30167,EMP7055,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30168,EMP7055,Compliance Refresher,Day 60,Completed
+LRN-30169,EMP7056,Security Awareness,Day 7,In Progress
+LRN-30170,EMP7056,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30171,EMP7056,Compliance Refresher,Day 60,Completed
+LRN-30172,EMP7057,Code of Conduct,Day 7,Completed
+LRN-30173,EMP7057,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30174,EMP7057,Compliance Refresher,Day 60,Completed
+LRN-30175,EMP7058,Security Awareness,Day 7,Completed
+LRN-30176,EMP7058,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30177,EMP7058,Role-Specific Certification,Day 60,Completed
+LRN-30178,EMP7059,Security Awareness,Day 7,Completed
+LRN-30179,EMP7059,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30180,EMP7059,Compliance Refresher,Day 60,Completed
+LRN-30181,EMP7060,Code of Conduct,Day 7,Completed
+LRN-30182,EMP7060,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30183,EMP7060,Role-Specific Certification,Day 60,Completed
+LRN-30184,EMP7061,Security Awareness,Day 7,Completed
+LRN-30185,EMP7061,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30186,EMP7061,Role-Specific Certification,Day 60,Completed
+LRN-30187,EMP7062,Code of Conduct,Day 7,Completed
+LRN-30188,EMP7062,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30189,EMP7062,Compliance Refresher,Day 60,Completed
+LRN-30190,EMP7063,Security Awareness,Day 7,In Progress
+LRN-30191,EMP7063,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30192,EMP7063,Compliance Refresher,Day 60,Not Started
+LRN-30193,EMP7064,Code of Conduct,Day 7,Completed
+LRN-30194,EMP7064,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30195,EMP7064,Role-Specific Certification,Day 60,Completed
+LRN-30196,EMP7065,Security Awareness,Day 7,Completed
+LRN-30197,EMP7065,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30198,EMP7065,Compliance Refresher,Day 60,Completed
+LRN-30199,EMP7066,Security Awareness,Day 7,Not Started
+LRN-30200,EMP7066,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30201,EMP7066,Role-Specific Certification,Day 60,In Progress
+LRN-30202,EMP7067,Code of Conduct,Day 7,Completed
+LRN-30203,EMP7067,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30204,EMP7067,Compliance Refresher,Day 60,Not Started
+LRN-30205,EMP7068,Security Awareness,Day 7,Completed
+LRN-30206,EMP7068,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30207,EMP7068,Compliance Refresher,Day 60,Completed
+LRN-30208,EMP7069,Security Awareness,Day 7,Completed
+LRN-30209,EMP7069,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30210,EMP7069,Compliance Refresher,Day 60,Completed
+LRN-30211,EMP7070,Security Awareness,Day 7,In Progress
+LRN-30212,EMP7070,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30213,EMP7070,Compliance Refresher,Day 60,Completed
+LRN-30214,EMP7071,Code of Conduct,Day 7,Not Started
+LRN-30215,EMP7071,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30216,EMP7071,Compliance Refresher,Day 60,Completed
+LRN-30217,EMP7072,Security Awareness,Day 7,In Progress
+LRN-30218,EMP7072,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30219,EMP7072,Compliance Refresher,Day 60,In Progress
+LRN-30220,EMP7073,Code of Conduct,Day 7,Completed
+LRN-30221,EMP7073,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30222,EMP7073,Compliance Refresher,Day 60,In Progress
+LRN-30223,EMP7074,Code of Conduct,Day 7,In Progress
+LRN-30224,EMP7074,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30225,EMP7074,Role-Specific Certification,Day 60,Not Started
+LRN-30226,EMP7075,Code of Conduct,Day 7,Completed
+LRN-30227,EMP7075,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30228,EMP7075,Role-Specific Certification,Day 60,In Progress
+LRN-30229,EMP7076,Security Awareness,Day 7,Completed
+LRN-30230,EMP7076,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30231,EMP7076,Role-Specific Certification,Day 60,In Progress
+LRN-30232,EMP7077,Code of Conduct,Day 7,In Progress
+LRN-30233,EMP7077,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30234,EMP7077,Compliance Refresher,Day 60,Completed
+LRN-30235,EMP7078,Code of Conduct,Day 7,Not Started
+LRN-30236,EMP7078,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30237,EMP7078,Compliance Refresher,Day 60,Not Started
+LRN-30238,EMP7079,Security Awareness,Day 7,Completed
+LRN-30239,EMP7079,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30240,EMP7079,Role-Specific Certification,Day 60,Completed
+LRN-30241,EMP7080,Code of Conduct,Day 7,In Progress
+LRN-30242,EMP7080,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30243,EMP7080,Role-Specific Certification,Day 60,Not Started
+LRN-30244,EMP7081,Code of Conduct,Day 7,Completed
+LRN-30245,EMP7081,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30246,EMP7081,Role-Specific Certification,Day 60,Completed
+LRN-30247,EMP7082,Security Awareness,Day 7,Not Started
+LRN-30248,EMP7082,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30249,EMP7082,Role-Specific Certification,Day 60,Completed
+LRN-30250,EMP7083,Security Awareness,Day 7,Not Started
+LRN-30251,EMP7083,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30252,EMP7083,Compliance Refresher,Day 60,Completed
+LRN-30253,EMP7084,Security Awareness,Day 7,Completed
+LRN-30254,EMP7084,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30255,EMP7084,Role-Specific Certification,Day 60,In Progress
+LRN-30256,EMP7085,Code of Conduct,Day 7,Completed
+LRN-30257,EMP7085,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30258,EMP7085,Role-Specific Certification,Day 60,In Progress
+LRN-30259,EMP7086,Security Awareness,Day 7,Completed
+LRN-30260,EMP7086,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30261,EMP7086,Compliance Refresher,Day 60,Completed
+LRN-30262,EMP7087,Security Awareness,Day 7,Completed
+LRN-30263,EMP7087,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30264,EMP7087,Compliance Refresher,Day 60,Completed
+LRN-30265,EMP7088,Code of Conduct,Day 7,Completed
+LRN-30266,EMP7088,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30267,EMP7088,Role-Specific Certification,Day 60,In Progress
+LRN-30268,EMP7089,Code of Conduct,Day 7,Completed
+LRN-30269,EMP7089,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30270,EMP7089,Role-Specific Certification,Day 60,Completed
+LRN-30271,EMP7090,Code of Conduct,Day 7,In Progress
+LRN-30272,EMP7090,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30273,EMP7090,Compliance Refresher,Day 60,In Progress
+LRN-30274,EMP7091,Code of Conduct,Day 7,Completed
+LRN-30275,EMP7091,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30276,EMP7091,Role-Specific Certification,Day 60,Completed
+LRN-30277,EMP7092,Code of Conduct,Day 7,Completed
+LRN-30278,EMP7092,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30279,EMP7092,Compliance Refresher,Day 60,Completed
+LRN-30280,EMP7093,Security Awareness,Day 7,Completed
+LRN-30281,EMP7093,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30282,EMP7093,Compliance Refresher,Day 60,Not Started
+LRN-30283,EMP7094,Code of Conduct,Day 7,Completed
+LRN-30284,EMP7094,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30285,EMP7094,Role-Specific Certification,Day 60,Not Started
+LRN-30286,EMP7095,Security Awareness,Day 7,Completed
+LRN-30287,EMP7095,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30288,EMP7095,Compliance Refresher,Day 60,Completed
+LRN-30289,EMP7096,Code of Conduct,Day 7,Completed
+LRN-30290,EMP7096,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30291,EMP7096,Role-Specific Certification,Day 60,Completed
+LRN-30292,EMP7097,Code of Conduct,Day 7,Completed
+LRN-30293,EMP7097,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30294,EMP7097,Compliance Refresher,Day 60,Completed
+LRN-30295,EMP7098,Code of Conduct,Day 7,Completed
+LRN-30296,EMP7098,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30297,EMP7098,Role-Specific Certification,Day 60,Completed
+LRN-30298,EMP7099,Security Awareness,Day 7,Completed
+LRN-30299,EMP7099,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30300,EMP7099,Compliance Refresher,Day 60,Completed
+LRN-30301,EMP7100,Security Awareness,Day 7,Completed
+LRN-30302,EMP7100,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30303,EMP7100,Compliance Refresher,Day 60,In Progress
+LRN-30304,EMP7101,Security Awareness,Day 7,In Progress
+LRN-30305,EMP7101,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30306,EMP7101,Compliance Refresher,Day 60,In Progress
+LRN-30307,EMP7102,Security Awareness,Day 7,Completed
+LRN-30308,EMP7102,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30309,EMP7102,Role-Specific Certification,Day 60,In Progress
+LRN-30310,EMP7103,Code of Conduct,Day 7,Completed
+LRN-30311,EMP7103,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30312,EMP7103,Compliance Refresher,Day 60,In Progress
+LRN-30313,EMP7104,Code of Conduct,Day 7,Completed
+LRN-30314,EMP7104,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30315,EMP7104,Role-Specific Certification,Day 60,Not Started
+LRN-30316,EMP7105,Code of Conduct,Day 7,Completed
+LRN-30317,EMP7105,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30318,EMP7105,Role-Specific Certification,Day 60,Not Started
+LRN-30319,EMP7106,Security Awareness,Day 7,In Progress
+LRN-30320,EMP7106,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30321,EMP7106,Compliance Refresher,Day 60,Completed
+LRN-30322,EMP7107,Security Awareness,Day 7,Completed
+LRN-30323,EMP7107,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30324,EMP7107,Role-Specific Certification,Day 60,Completed
+LRN-30325,EMP7108,Code of Conduct,Day 7,Completed
+LRN-30326,EMP7108,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30327,EMP7108,Role-Specific Certification,Day 60,Completed
+LRN-30328,EMP7109,Security Awareness,Day 7,Completed
+LRN-30329,EMP7109,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30330,EMP7109,Compliance Refresher,Day 60,Completed
+LRN-30331,EMP7110,Security Awareness,Day 7,In Progress
+LRN-30332,EMP7110,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30333,EMP7110,Compliance Refresher,Day 60,In Progress
+LRN-30334,EMP7111,Code of Conduct,Day 7,Completed
+LRN-30335,EMP7111,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30336,EMP7111,Role-Specific Certification,Day 60,Completed
+LRN-30337,EMP7112,Security Awareness,Day 7,Not Started
+LRN-30338,EMP7112,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30339,EMP7112,Role-Specific Certification,Day 60,Completed
+LRN-30340,EMP7113,Code of Conduct,Day 7,Completed
+LRN-30341,EMP7113,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30342,EMP7113,Compliance Refresher,Day 60,Completed
+LRN-30343,EMP7114,Code of Conduct,Day 7,In Progress
+LRN-30344,EMP7114,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30345,EMP7114,Role-Specific Certification,Day 60,Completed
+LRN-30346,EMP7115,Code of Conduct,Day 7,Completed
+LRN-30347,EMP7115,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30348,EMP7115,Compliance Refresher,Day 60,Completed
+LRN-30349,EMP7116,Code of Conduct,Day 7,Completed
+LRN-30350,EMP7116,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30351,EMP7116,Compliance Refresher,Day 60,Completed
+LRN-30352,EMP7117,Security Awareness,Day 7,Completed
+LRN-30353,EMP7117,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30354,EMP7117,Role-Specific Certification,Day 60,Completed
+LRN-30355,EMP7118,Code of Conduct,Day 7,Completed
+LRN-30356,EMP7118,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30357,EMP7118,Compliance Refresher,Day 60,In Progress
+LRN-30358,EMP7119,Code of Conduct,Day 7,Completed
+LRN-30359,EMP7119,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30360,EMP7119,Compliance Refresher,Day 60,In Progress
+LRN-30361,EMP7120,Code of Conduct,Day 7,Completed
+LRN-30362,EMP7120,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30363,EMP7120,Role-Specific Certification,Day 60,Completed
+LRN-30364,EMP7121,Security Awareness,Day 7,In Progress
+LRN-30365,EMP7121,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30366,EMP7121,Compliance Refresher,Day 60,Completed
+LRN-30367,EMP7122,Security Awareness,Day 7,In Progress
+LRN-30368,EMP7122,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30369,EMP7122,Role-Specific Certification,Day 60,Not Started
+LRN-30370,EMP7123,Security Awareness,Day 7,Not Started
+LRN-30371,EMP7123,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30372,EMP7123,Compliance Refresher,Day 60,Not Started
+LRN-30373,EMP7124,Security Awareness,Day 7,Completed
+LRN-30374,EMP7124,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30375,EMP7124,Compliance Refresher,Day 60,Completed
+LRN-30376,EMP7125,Code of Conduct,Day 7,Not Started
+LRN-30377,EMP7125,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30378,EMP7125,Compliance Refresher,Day 60,Completed
+LRN-30379,EMP7126,Security Awareness,Day 7,In Progress
+LRN-30380,EMP7126,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30381,EMP7126,Role-Specific Certification,Day 60,Completed
+LRN-30382,EMP7127,Security Awareness,Day 7,Completed
+LRN-30383,EMP7127,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30384,EMP7127,Role-Specific Certification,Day 60,In Progress
+LRN-30385,EMP7128,Security Awareness,Day 7,In Progress
+LRN-30386,EMP7128,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30387,EMP7128,Role-Specific Certification,Day 60,Completed
+LRN-30388,EMP7129,Code of Conduct,Day 7,In Progress
+LRN-30389,EMP7129,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30390,EMP7129,Compliance Refresher,Day 60,Completed
+LRN-30391,EMP7130,Security Awareness,Day 7,In Progress
+LRN-30392,EMP7130,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30393,EMP7130,Compliance Refresher,Day 60,Completed
+LRN-30394,EMP7131,Security Awareness,Day 7,Completed
+LRN-30395,EMP7131,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30396,EMP7131,Role-Specific Certification,Day 60,Completed
+LRN-30397,EMP7132,Code of Conduct,Day 7,Completed
+LRN-30398,EMP7132,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30399,EMP7132,Role-Specific Certification,Day 60,Completed
+LRN-30400,EMP7133,Security Awareness,Day 7,In Progress
+LRN-30401,EMP7133,Anti-Harassment & Respect at Work,Day 30,Not Started
+LRN-30402,EMP7133,Compliance Refresher,Day 60,Not Started
+LRN-30403,EMP7134,Code of Conduct,Day 7,Completed
+LRN-30404,EMP7134,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30405,EMP7134,Role-Specific Certification,Day 60,In Progress
+LRN-30406,EMP7135,Code of Conduct,Day 7,Completed
+LRN-30407,EMP7135,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30408,EMP7135,Compliance Refresher,Day 60,Completed
+LRN-30409,EMP7136,Code of Conduct,Day 7,Completed
+LRN-30410,EMP7136,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30411,EMP7136,Role-Specific Certification,Day 60,In Progress
+LRN-30412,EMP7137,Security Awareness,Day 7,Completed
+LRN-30413,EMP7137,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30414,EMP7137,Compliance Refresher,Day 60,In Progress
+LRN-30415,EMP7138,Security Awareness,Day 7,Completed
+LRN-30416,EMP7138,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30417,EMP7138,Role-Specific Certification,Day 60,Completed
+LRN-30418,EMP7139,Security Awareness,Day 7,Completed
+LRN-30419,EMP7139,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30420,EMP7139,Compliance Refresher,Day 60,In Progress
+LRN-30421,EMP7140,Security Awareness,Day 7,Completed
+LRN-30422,EMP7140,Data Privacy (PDPA/GDPR),Day 30,Not Started
+LRN-30423,EMP7140,Role-Specific Certification,Day 60,Completed
+LRN-30424,EMP7141,Security Awareness,Day 7,Completed
+LRN-30425,EMP7141,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30426,EMP7141,Compliance Refresher,Day 60,Completed
+LRN-30427,EMP7142,Code of Conduct,Day 7,In Progress
+LRN-30428,EMP7142,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30429,EMP7142,Role-Specific Certification,Day 60,In Progress
+LRN-30430,EMP7143,Security Awareness,Day 7,Completed
+LRN-30431,EMP7143,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30432,EMP7143,Compliance Refresher,Day 60,Completed
+LRN-30433,EMP7144,Security Awareness,Day 7,Completed
+LRN-30434,EMP7144,Anti-Harassment & Respect at Work,Day 30,In Progress
+LRN-30435,EMP7144,Compliance Refresher,Day 60,Completed
+LRN-30436,EMP7145,Code of Conduct,Day 7,In Progress
+LRN-30437,EMP7145,Data Privacy (PDPA/GDPR),Day 30,Completed
+LRN-30438,EMP7145,Compliance Refresher,Day 60,Not Started
+LRN-30439,EMP7146,Security Awareness,Day 7,Not Started
+LRN-30440,EMP7146,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30441,EMP7146,Role-Specific Certification,Day 60,Completed
+LRN-30442,EMP7147,Code of Conduct,Day 7,Completed
+LRN-30443,EMP7147,Anti-Harassment & Respect at Work,Day 30,Completed
+LRN-30444,EMP7147,Role-Specific Certification,Day 60,Not Started
+LRN-30445,EMP7148,Security Awareness,Day 7,Completed
+LRN-30446,EMP7148,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30447,EMP7148,Compliance Refresher,Day 60,Not Started
+LRN-30448,EMP7149,Security Awareness,Day 7,Completed
+LRN-30449,EMP7149,Data Privacy (PDPA/GDPR),Day 30,In Progress
+LRN-30450,EMP7149,Compliance Refresher,Day 60,Completed

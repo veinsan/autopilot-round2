@@ -1,0 +1,7 @@
+entity_id,name,country,jurisdiction,timezone
+LE-1001,Company Malaysia Sdn Bhd,Malaysia,MY,Asia/Kuala_Lumpur
+LE-1002,Company Singapore Pte Ltd,Singapore,SG,Asia/Singapore
+LE-1003,Company India Pvt Ltd,India,IN,Asia/Kolkata
+LE-1004,Company Philippines Inc,Philippines,PH,Asia/Manila
+LE-1005,Company Australia Pty Ltd,Australia,AU,Australia/Sydney
+LE-1006,Company Penang Operations Sdn Bhd,Malaysia,MY,Asia/Kuala_Lumpur

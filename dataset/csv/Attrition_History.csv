@@ -1,0 +1,191 @@
+record_id,job_family,tenure_days,left_flag,reason
+ATT-20001,Sales,120,1,Career growth
+ATT-20002,Technology,540,1,Involuntary
+ATT-20003,Operations,60,1,Compensation
+ATT-20004,Sales,90,0,
+ATT-20005,Operations,320,0,
+ATT-20006,Technology,240,0,
+ATT-20007,Technology,120,1,Compensation
+ATT-20008,Sales,72,1,Better opportunity
+ATT-20009,Sales,240,0,
+ATT-20010,People,90,1,Manager relationship
+ATT-20011,Sales,320,1,Better opportunity
+ATT-20012,Finance,31,0,
+ATT-20013,Technology,180,1,Relocation
+ATT-20014,Operations,150,1,Relocation
+ATT-20015,Operations,150,0,
+ATT-20016,Operations,90,1,Better opportunity
+ATT-20017,People,72,1,Involuntary
+ATT-20018,Operations,320,1,Relocation
+ATT-20019,Operations,150,1,Better opportunity
+ATT-20020,Sales,90,0,
+ATT-20021,Operations,72,1,Better opportunity
+ATT-20022,People,410,1,Career growth
+ATT-20023,Sales,150,0,
+ATT-20024,People,540,1,Role mismatch
+ATT-20025,Sales,45,0,
+ATT-20026,Sales,320,0,
+ATT-20027,People,150,1,Compensation
+ATT-20028,Finance,540,1,Compensation
+ATT-20029,Finance,120,0,
+ATT-20030,Sales,320,0,
+ATT-20031,Technology,540,1,Manager relationship
+ATT-20032,Finance,540,0,
+ATT-20033,People,410,1,Career growth
+ATT-20034,Finance,60,0,
+ATT-20035,Technology,72,1,Onboarding friction
+ATT-20036,People,150,0,
+ATT-20037,Technology,540,1,Role mismatch
+ATT-20038,Finance,88,0,
+ATT-20039,Finance,540,1,Role mismatch
+ATT-20040,Sales,88,1,Manager relationship
+ATT-20041,Operations,180,1,Relocation
+ATT-20042,Finance,240,1,Role mismatch
+ATT-20043,Finance,410,1,Role mismatch
+ATT-20044,Technology,410,1,Role mismatch
+ATT-20045,Operations,410,0,
+ATT-20046,Operations,60,1,Career growth
+ATT-20047,Finance,320,1,Relocation
+ATT-20048,Sales,88,1,Compensation
+ATT-20049,Finance,90,0,
+ATT-20050,Sales,120,1,Manager relationship
+ATT-20051,Finance,320,1,Onboarding friction
+ATT-20052,Sales,90,1,Involuntary
+ATT-20053,Operations,180,1,Involuntary
+ATT-20054,Technology,31,0,
+ATT-20055,People,90,1,Relocation
+ATT-20056,Operations,60,1,Better opportunity
+ATT-20057,Operations,90,1,Compensation
+ATT-20058,Sales,72,0,
+ATT-20059,Finance,320,1,Better opportunity
+ATT-20060,Finance,180,1,Better opportunity
+ATT-20061,People,150,1,Relocation
+ATT-20062,Operations,88,0,
+ATT-20063,Operations,410,0,
+ATT-20064,Operations,72,0,
+ATT-20065,Technology,60,1,Role mismatch
+ATT-20066,Sales,88,1,Relocation
+ATT-20067,People,60,1,Compensation
+ATT-20068,Operations,72,1,Involuntary
+ATT-20069,Technology,45,1,Compensation
+ATT-20070,Finance,540,1,Relocation
+ATT-20071,Technology,45,1,Involuntary
+ATT-20072,Operations,45,1,Relocation
+ATT-20073,Sales,150,1,Compensation
+ATT-20074,Sales,120,0,
+ATT-20075,People,410,0,
+ATT-20076,Operations,240,0,
+ATT-20077,Sales,540,1,Compensation
+ATT-20078,Finance,540,1,Role mismatch
+ATT-20079,Technology,320,1,Involuntary
+ATT-20080,Sales,88,0,
+ATT-20081,Finance,88,0,
+ATT-20082,Operations,90,1,Role mismatch
+ATT-20083,Technology,45,0,
+ATT-20084,Operations,150,1,Involuntary
+ATT-20085,Technology,60,1,Career growth
+ATT-20086,Finance,45,0,
+ATT-20087,Technology,90,1,Manager relationship
+ATT-20088,Operations,540,1,Relocation
+ATT-20089,Operations,88,1,Onboarding friction
+ATT-20090,Sales,150,1,Role mismatch
+ATT-20091,Sales,72,1,Manager relationship
+ATT-20092,Finance,60,1,Career growth
+ATT-20093,Operations,60,1,Manager relationship
+ATT-20094,Finance,180,0,
+ATT-20095,Sales,540,1,Role mismatch
+ATT-20096,Operations,88,1,Role mismatch
+ATT-20097,Finance,60,1,Onboarding friction
+ATT-20098,Finance,150,1,Career growth
+ATT-20099,Technology,31,0,
+ATT-20100,Technology,31,0,
+ATT-20101,Finance,320,0,
+ATT-20102,Technology,540,1,Relocation
+ATT-20103,Operations,320,0,
+ATT-20104,Finance,90,1,Career growth
+ATT-20105,Technology,90,1,Relocation
+ATT-20106,Operations,240,1,Role mismatch
+ATT-20107,People,45,1,Onboarding friction
+ATT-20108,Technology,410,1,Compensation
+ATT-20109,Technology,410,0,
+ATT-20110,Technology,72,1,Career growth
+ATT-20111,People,45,1,Onboarding friction
+ATT-20112,Finance,180,1,Role mismatch
+ATT-20113,People,150,1,Better opportunity
+ATT-20114,Finance,540,0,
+ATT-20115,Operations,60,1,Relocation
+ATT-20116,Sales,45,1,Onboarding friction
+ATT-20117,Sales,180,0,
+ATT-20118,Finance,180,1,Role mismatch
+ATT-20119,People,60,0,
+ATT-20120,People,540,0,
+ATT-20121,Finance,90,0,
+ATT-20122,Technology,410,0,
+ATT-20123,Operations,90,1,Involuntary
+ATT-20124,Finance,90,1,Role mismatch
+ATT-20125,Finance,240,0,
+ATT-20126,People,60,1,Career growth
+ATT-20127,Technology,120,0,
+ATT-20128,People,180,1,Onboarding friction
+ATT-20129,People,240,1,Compensation
+ATT-20130,Sales,540,1,Involuntary
+ATT-20131,Finance,240,1,Better opportunity
+ATT-20132,People,240,1,Better opportunity
+ATT-20133,Sales,60,0,
+ATT-20134,People,240,0,
+ATT-20135,Sales,320,0,
+ATT-20136,People,540,0,
+ATT-20137,Finance,150,1,Manager relationship
+ATT-20138,Finance,45,1,Onboarding friction
+ATT-20139,Technology,180,0,
+ATT-20140,Technology,31,1,Role mismatch
+ATT-20141,People,240,0,
+ATT-20142,People,31,1,Career growth
+ATT-20143,Operations,88,0,
+ATT-20144,Sales,320,0,
+ATT-20145,Sales,150,0,
+ATT-20146,Operations,540,0,
+ATT-20147,Finance,410,0,
+ATT-20148,Operations,72,0,
+ATT-20149,Operations,88,1,Compensation
+ATT-20150,Sales,240,0,
+ATT-20151,People,540,1,Onboarding friction
+ATT-20152,People,90,0,
+ATT-20153,Operations,320,1,Role mismatch
+ATT-20154,Operations,120,0,
+ATT-20155,Operations,72,0,
+ATT-20156,People,60,0,
+ATT-20157,Technology,45,0,
+ATT-20158,Technology,31,1,Relocation
+ATT-20159,Technology,31,1,Career growth
+ATT-20160,Operations,72,0,
+ATT-20161,Sales,45,1,Manager relationship
+ATT-20162,Sales,240,0,
+ATT-20163,People,60,0,
+ATT-20164,People,150,0,
+ATT-20165,Finance,410,0,
+ATT-20166,Technology,72,1,Better opportunity
+ATT-20167,Sales,90,1,Better opportunity
+ATT-20168,Technology,31,1,Career growth
+ATT-20169,Technology,45,1,Role mismatch
+ATT-20170,People,120,0,
+ATT-20171,Finance,72,0,
+ATT-20172,People,320,0,
+ATT-20173,Technology,150,1,Role mismatch
+ATT-20174,Finance,31,1,Relocation
+ATT-20175,Operations,240,1,Manager relationship
+ATT-20176,Operations,410,1,Compensation
+ATT-20177,People,240,0,
+ATT-20178,Finance,90,1,Manager relationship
+ATT-20179,Technology,60,1,Manager relationship
+ATT-20180,Operations,90,0,
+ATT-20181,People,540,1,Involuntary
+ATT-20182,Operations,88,1,Onboarding friction
+ATT-20183,Finance,240,1,Compensation
+ATT-20184,Finance,31,0,
+ATT-20185,People,410,0,
+ATT-20186,Technology,31,1,Manager relationship
+ATT-20187,Operations,45,1,Relocation
+ATT-20188,People,120,0,
+ATT-20189,People,150,1,Career growth
+ATT-20190,Sales,150,1,Compensation

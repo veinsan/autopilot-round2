@@ -1,0 +1,301 @@
+item_id,employee_id,doc_type,jurisdiction,due_date,status
+CMP-80001,EMP7000,EPF/SOCSO registration,MY,2026-06-05,Verified
+CMP-80002,EMP7000,Signed employment contract,MY,2026-06-02,Missing
+CMP-80003,EMP7001,EPF/SOCSO registration,MY,2026-06-30,Verified
+CMP-80004,EMP7001,Signed employment contract,MY,2026-06-30,Verified
+CMP-80005,EMP7002,Employment Pass (Work Authorization),SG,2026-06-05,Submitted
+CMP-80006,EMP7002,Signed employment contract,SG,2026-05-29,Verified
+CMP-80007,EMP7003,Employment Pass (Work Authorization),SG,2026-07-22,Verified
+CMP-80008,EMP7003,Signed employment contract,SG,2026-07-18,Verified
+CMP-80009,EMP7004,EPF/SOCSO registration,MY,2026-04-30,Verified
+CMP-80010,EMP7004,Signed employment contract,MY,2026-04-30,Missing
+CMP-80011,EMP7005,EPF/SOCSO registration,MY,2026-06-03,Verified
+CMP-80012,EMP7005,Signed employment contract,MY,2026-06-03,Verified
+CMP-80013,EMP7006,EPF/SOCSO registration,MY,2026-06-13,Verified
+CMP-80014,EMP7006,Signed employment contract,MY,2026-06-06,Verified
+CMP-80015,EMP7007,EPF/SOCSO registration,MY,2026-05-14,Verified
+CMP-80016,EMP7007,Signed employment contract,MY,2026-05-11,Verified
+CMP-80017,EMP7008,EPF/SOCSO registration,MY,2026-06-28,Verified
+CMP-80018,EMP7008,Signed employment contract,MY,2026-07-05,Verified
+CMP-80019,EMP7009,EPF/SOCSO registration,MY,2026-08-01,Verified
+CMP-80020,EMP7009,Signed employment contract,MY,2026-08-01,Submitted
+CMP-80021,EMP7010,EPF/SOCSO registration,MY,2026-05-10,Verified
+CMP-80022,EMP7010,Signed employment contract,MY,2026-05-10,Submitted
+CMP-80023,EMP7011,EPF/SOCSO registration,MY,2026-06-18,Verified
+CMP-80024,EMP7011,Signed employment contract,MY,2026-06-22,Verified
+CMP-80025,EMP7012,EPF/SOCSO registration,MY,2026-06-01,Verified
+CMP-80026,EMP7012,Signed employment contract,MY,2026-06-01,Verified
+CMP-80027,EMP7013,EPF/SOCSO registration,MY,2026-07-05,Submitted
+CMP-80028,EMP7013,Signed employment contract,MY,2026-07-05,Verified
+CMP-80029,EMP7014,EPF/SOCSO registration,MY,2026-07-31,Verified
+CMP-80030,EMP7014,Signed employment contract,MY,2026-07-24,Submitted
+CMP-80031,EMP7015,FRRO registration (Work Authorization),IN,2026-07-13,Verified
+CMP-80032,EMP7015,PF/UAN declaration,IN,2026-07-09,Verified
+CMP-80033,EMP7016,Employment Pass (Work Authorization),SG,2026-05-13,Verified
+CMP-80034,EMP7016,Signed employment contract,SG,2026-05-20,Verified
+CMP-80035,EMP7017,EPF/SOCSO registration,MY,2026-07-21,Verified
+CMP-80036,EMP7017,Signed employment contract,MY,2026-07-24,Verified
+CMP-80037,EMP7018,EPF/SOCSO registration,MY,2026-06-11,Missing
+CMP-80038,EMP7018,Signed employment contract,MY,2026-06-18,Verified
+CMP-80039,EMP7019,Employment Pass (Work Authorization),SG,2026-06-15,Verified
+CMP-80040,EMP7019,Signed employment contract,SG,2026-06-04,Verified
+CMP-80041,EMP7020,Employment Pass (Work Authorization),SG,2026-05-17,Verified
+CMP-80042,EMP7020,Signed employment contract,SG,2026-05-17,Submitted
+CMP-80043,EMP7021,Employment Pass (Work Authorization),SG,2026-07-15,Submitted
+CMP-80044,EMP7021,Signed employment contract,SG,2026-07-11,Verified
+CMP-80045,EMP7022,EPF/SOCSO registration,MY,2026-07-19,Verified
+CMP-80046,EMP7022,Signed employment contract,MY,2026-07-19,Verified
+CMP-80047,EMP7023,Employment Pass (Work Authorization),SG,2026-05-01,Verified
+CMP-80048,EMP7023,Signed employment contract,SG,2026-05-12,Verified
+CMP-80049,EMP7024,Employment Pass (Work Authorization),SG,2026-08-08,Submitted
+CMP-80050,EMP7024,Signed employment contract,SG,2026-08-08,Verified
+CMP-80051,EMP7025,EPF/SOCSO registration,MY,2026-04-24,Submitted
+CMP-80052,EMP7025,Signed employment contract,MY,2026-04-28,Verified
+CMP-80053,EMP7026,EPF/SOCSO registration,MY,2026-08-14,Submitted
+CMP-80054,EMP7026,Signed employment contract,MY,2026-08-18,Verified
+CMP-80055,EMP7027,Employment Pass (Work Authorization),SG,2026-04-26,Verified
+CMP-80056,EMP7027,Signed employment contract,SG,2026-05-03,Submitted
+CMP-80057,EMP7028,EPF/SOCSO registration,MY,2026-07-09,Missing
+CMP-80058,EMP7028,Signed employment contract,MY,2026-07-09,Verified
+CMP-80059,EMP7029,EPF/SOCSO registration,MY,2026-06-12,Verified
+CMP-80060,EMP7029,Signed employment contract,MY,2026-06-19,Verified
+CMP-80061,EMP7030,Employment Pass (Work Authorization),SG,2026-06-24,Submitted
+CMP-80062,EMP7030,Signed employment contract,SG,2026-06-28,Verified
+CMP-80063,EMP7031,EPF/SOCSO registration,MY,2026-05-19,Missing
+CMP-80064,EMP7031,Signed employment contract,MY,2026-05-26,Verified
+CMP-80065,EMP7032,Employment Pass (Work Authorization),SG,2026-08-04,Submitted
+CMP-80066,EMP7032,Signed employment contract,SG,2026-08-08,Submitted
+CMP-80067,EMP7033,EPF/SOCSO registration,MY,2026-06-18,Verified
+CMP-80068,EMP7033,Signed employment contract,MY,2026-06-22,Verified
+CMP-80069,EMP7034,EPF/SOCSO registration,MY,2026-06-10,Missing
+CMP-80070,EMP7034,Signed employment contract,MY,2026-06-06,Submitted
+CMP-80071,EMP7035,EPF/SOCSO registration,MY,2026-06-30,Verified
+CMP-80072,EMP7035,Signed employment contract,MY,2026-06-26,Submitted
+CMP-80073,EMP7036,EPF/SOCSO registration,MY,2026-07-02,Verified
+CMP-80074,EMP7036,Signed employment contract,MY,2026-07-06,Submitted
+CMP-80075,EMP7037,EPF/SOCSO registration,MY,2026-04-28,Submitted
+CMP-80076,EMP7037,Signed employment contract,MY,2026-04-24,Missing
+CMP-80077,EMP7038,Employment Pass (Work Authorization),SG,2026-05-21,Verified
+CMP-80078,EMP7038,Signed employment contract,SG,2026-05-25,Verified
+CMP-80079,EMP7039,EPF/SOCSO registration,MY,2026-08-19,Verified
+CMP-80080,EMP7039,Signed employment contract,MY,2026-08-08,Verified
+CMP-80081,EMP7040,EPF/SOCSO registration,MY,2026-08-06,Submitted
+CMP-80082,EMP7040,Signed employment contract,MY,2026-08-06,Submitted
+CMP-80083,EMP7041,EPF/SOCSO registration,MY,2026-05-23,Submitted
+CMP-80084,EMP7041,Signed employment contract,MY,2026-05-19,Missing
+CMP-80085,EMP7042,Employment Pass (Work Authorization),SG,2026-08-16,Missing
+CMP-80086,EMP7042,Signed employment contract,SG,2026-08-23,Missing
+CMP-80087,EMP7043,EPF/SOCSO registration,MY,2026-06-12,Submitted
+CMP-80088,EMP7043,Signed employment contract,MY,2026-06-12,Verified
+CMP-80089,EMP7044,EPF/SOCSO registration,MY,2026-07-04,Verified
+CMP-80090,EMP7044,Signed employment contract,MY,2026-06-30,Missing
+CMP-80091,EMP7045,Right-to-Work (VEVO) check,AU,2026-08-05,Verified
+CMP-80092,EMP7045,TFN declaration,AU,2026-08-05,Submitted
+CMP-80093,EMP7046,Employment Pass (Work Authorization),SG,2026-07-14,Verified
+CMP-80094,EMP7046,Signed employment contract,SG,2026-07-21,Verified
+CMP-80095,EMP7047,EPF/SOCSO registration,MY,2026-06-13,Verified
+CMP-80096,EMP7047,Signed employment contract,MY,2026-06-24,Verified
+CMP-80097,EMP7048,Employment Pass (Work Authorization),SG,2026-06-02,Missing
+CMP-80098,EMP7048,Signed employment contract,SG,2026-06-02,Verified
+CMP-80099,EMP7049,EPF/SOCSO registration,MY,2026-08-06,Verified
+CMP-80100,EMP7049,Signed employment contract,MY,2026-08-13,Verified
+CMP-80101,EMP7050,EPF/SOCSO registration,MY,2026-07-16,Verified
+CMP-80102,EMP7050,Signed employment contract,MY,2026-07-23,Verified
+CMP-80103,EMP7051,EPF/SOCSO registration,MY,2026-06-14,Submitted
+CMP-80104,EMP7051,Signed employment contract,MY,2026-06-14,Verified
+CMP-80105,EMP7052,EPF/SOCSO registration,MY,2026-05-30,Verified
+CMP-80106,EMP7052,Signed employment contract,MY,2026-06-02,Verified
+CMP-80107,EMP7053,Employment Pass (Work Authorization),SG,2026-07-16,Verified
+CMP-80108,EMP7053,Signed employment contract,SG,2026-07-05,Submitted
+CMP-80109,EMP7054,Employment Pass (Work Authorization),SG,2026-04-28,Missing
+CMP-80110,EMP7054,Signed employment contract,SG,2026-04-28,Verified
+CMP-80111,EMP7055,EPF/SOCSO registration,MY,2026-06-01,Verified
+CMP-80112,EMP7055,Signed employment contract,MY,2026-06-05,Verified
+CMP-80113,EMP7056,Employment Pass (Work Authorization),SG,2026-06-30,Verified
+CMP-80114,EMP7056,Signed employment contract,SG,2026-07-11,Verified
+CMP-80115,EMP7057,EPF/SOCSO registration,MY,2026-06-17,Verified
+CMP-80116,EMP7057,Signed employment contract,MY,2026-06-24,Verified
+CMP-80117,EMP7058,Employment Pass (Work Authorization),SG,2026-06-08,Submitted
+CMP-80118,EMP7058,Signed employment contract,SG,2026-06-11,Submitted
+CMP-80119,EMP7059,Employment Pass (Work Authorization),SG,2026-07-18,Submitted
+CMP-80120,EMP7059,Signed employment contract,SG,2026-07-11,Verified
+CMP-80121,EMP7060,FRRO registration (Work Authorization),IN,2026-05-30,Missing
+CMP-80122,EMP7060,PF/UAN declaration,IN,2026-06-06,Submitted
+CMP-80123,EMP7061,EPF/SOCSO registration,MY,2026-06-02,Verified
+CMP-80124,EMP7061,Signed employment contract,MY,2026-05-29,Verified
+CMP-80125,EMP7062,EPF/SOCSO registration,MY,2026-06-06,Submitted
+CMP-80126,EMP7062,Signed employment contract,MY,2026-06-03,Missing
+CMP-80127,EMP7063,EPF/SOCSO registration,MY,2026-06-09,Verified
+CMP-80128,EMP7063,Signed employment contract,MY,2026-05-29,Verified
+CMP-80129,EMP7064,EPF/SOCSO registration,MY,2026-06-05,Submitted
+CMP-80130,EMP7064,Signed employment contract,MY,2026-06-02,Submitted
+CMP-80131,EMP7065,EPF/SOCSO registration,MY,2026-05-30,Verified
+CMP-80132,EMP7065,Signed employment contract,MY,2026-06-10,Verified
+CMP-80133,EMP7066,EPF/SOCSO registration,MY,2026-06-09,Submitted
+CMP-80134,EMP7066,Signed employment contract,MY,2026-06-09,Verified
+CMP-80135,EMP7067,EPF/SOCSO registration,MY,2026-05-29,Verified
+CMP-80136,EMP7067,Signed employment contract,MY,2026-06-05,Submitted
+CMP-80137,EMP7068,EPF/SOCSO registration,MY,2026-06-02,Submitted
+CMP-80138,EMP7068,Signed employment contract,MY,2026-05-29,Verified
+CMP-80139,EMP7069,EPF/SOCSO registration,MY,2026-06-04,Verified
+CMP-80140,EMP7069,Signed employment contract,MY,2026-06-04,Missing
+CMP-80141,EMP7070,EPF/SOCSO registration,MY,2026-06-04,Submitted
+CMP-80142,EMP7070,Signed employment contract,MY,2026-06-04,Verified
+CMP-80143,EMP7071,EPF/SOCSO registration,MY,2026-05-29,Submitted
+CMP-80144,EMP7071,Signed employment contract,MY,2026-06-05,Submitted
+CMP-80145,EMP7072,Right-to-Work (VEVO) check,AU,2026-07-20,Verified
+CMP-80146,EMP7072,TFN declaration,AU,2026-07-09,Verified
+CMP-80147,EMP7073,EPF/SOCSO registration,MY,2026-07-27,Submitted
+CMP-80148,EMP7073,Signed employment contract,MY,2026-07-20,Verified
+CMP-80149,EMP7074,EPF/SOCSO registration,MY,2026-06-04,Verified
+CMP-80150,EMP7074,Signed employment contract,MY,2026-06-15,Verified
+CMP-80151,EMP7075,Right-to-Work (VEVO) check,AU,2026-06-21,Verified
+CMP-80152,EMP7075,TFN declaration,AU,2026-07-02,Submitted
+CMP-80153,EMP7076,Employment Pass (Work Authorization),SG,2026-06-11,Submitted
+CMP-80154,EMP7076,Signed employment contract,SG,2026-06-15,Missing
+CMP-80155,EMP7077,EPF/SOCSO registration,MY,2026-08-21,Verified
+CMP-80156,EMP7077,Signed employment contract,MY,2026-08-24,Submitted
+CMP-80157,EMP7078,EPF/SOCSO registration,MY,2026-08-24,Verified
+CMP-80158,EMP7078,Signed employment contract,MY,2026-08-20,Verified
+CMP-80159,EMP7079,Right-to-Work (VEVO) check,AU,2026-06-18,Verified
+CMP-80160,EMP7079,TFN declaration,AU,2026-06-25,Submitted
+CMP-80161,EMP7080,EPF/SOCSO registration,MY,2026-08-15,Verified
+CMP-80162,EMP7080,Signed employment contract,MY,2026-08-26,Verified
+CMP-80163,EMP7081,EPF/SOCSO registration,MY,2026-07-12,Verified
+CMP-80164,EMP7081,Signed employment contract,MY,2026-07-05,Verified
+CMP-80165,EMP7082,Right-to-Work (VEVO) check,AU,2026-06-09,Verified
+CMP-80166,EMP7082,TFN declaration,AU,2026-06-09,Verified
+CMP-80167,EMP7083,EPF/SOCSO registration,MY,2026-08-23,Submitted
+CMP-80168,EMP7083,Signed employment contract,MY,2026-08-20,Verified
+CMP-80169,EMP7084,FRRO registration (Work Authorization),IN,2026-07-12,Verified
+CMP-80170,EMP7084,PF/UAN declaration,IN,2026-07-12,Verified
+CMP-80171,EMP7085,Employment Pass (Work Authorization),SG,2026-07-06,Verified
+CMP-80172,EMP7085,Signed employment contract,SG,2026-07-06,Verified
+CMP-80173,EMP7086,FRRO registration (Work Authorization),IN,2026-07-25,Verified
+CMP-80174,EMP7086,PF/UAN declaration,IN,2026-07-25,Submitted
+CMP-80175,EMP7087,EPF/SOCSO registration,MY,2026-07-19,Verified
+CMP-80176,EMP7087,Signed employment contract,MY,2026-07-23,Verified
+CMP-80177,EMP7088,FRRO registration (Work Authorization),IN,2026-07-25,Submitted
+CMP-80178,EMP7088,PF/UAN declaration,IN,2026-07-22,Missing
+CMP-80179,EMP7089,Alien Employment Permit (Work Authorization),PH,2026-07-26,Verified
+CMP-80180,EMP7089,SSS/PhilHealth registration,PH,2026-07-23,Verified
+CMP-80181,EMP7090,EPF/SOCSO registration,MY,2026-07-05,Verified
+CMP-80182,EMP7090,Signed employment contract,MY,2026-07-05,Verified
+CMP-80183,EMP7091,Employment Pass (Work Authorization),SG,2026-08-09,Missing
+CMP-80184,EMP7091,Signed employment contract,SG,2026-08-25,Verified
+CMP-80185,EMP7092,Right-to-Work (VEVO) check,AU,2026-05-24,Submitted
+CMP-80186,EMP7092,TFN declaration,AU,2026-05-31,Verified
+CMP-80187,EMP7093,Right-to-Work (VEVO) check,AU,2026-05-15,Verified
+CMP-80188,EMP7093,TFN declaration,AU,2026-05-18,Submitted
+CMP-80189,EMP7094,EPF/SOCSO registration,MY,2026-08-03,Submitted
+CMP-80190,EMP7094,Signed employment contract,MY,2026-08-03,Verified
+CMP-80191,EMP7095,FRRO registration (Work Authorization),IN,2026-06-03,Verified
+CMP-80192,EMP7095,PF/UAN declaration,IN,2026-05-30,Verified
+CMP-80193,EMP7096,Alien Employment Permit (Work Authorization),PH,2026-06-14,Verified
+CMP-80194,EMP7096,SSS/PhilHealth registration,PH,2026-06-18,Verified
+CMP-80195,EMP7097,EPF/SOCSO registration,MY,2026-08-12,Submitted
+CMP-80196,EMP7097,Signed employment contract,MY,2026-08-12,Verified
+CMP-80197,EMP7098,Right-to-Work (VEVO) check,AU,2026-07-13,Submitted
+CMP-80198,EMP7098,TFN declaration,AU,2026-07-09,Verified
+CMP-80199,EMP7099,Right-to-Work (VEVO) check,AU,2026-06-01,Verified
+CMP-80200,EMP7099,TFN declaration,AU,2026-06-01,Verified
+CMP-80201,EMP7100,EPF/SOCSO registration,MY,2026-05-25,Missing
+CMP-80202,EMP7100,Signed employment contract,MY,2026-06-05,Verified
+CMP-80203,EMP7101,EPF/SOCSO registration,MY,2026-05-13,Verified
+CMP-80204,EMP7101,Signed employment contract,MY,2026-05-16,Submitted
+CMP-80205,EMP7102,Right-to-Work (VEVO) check,AU,2026-06-26,Verified
+CMP-80206,EMP7102,TFN declaration,AU,2026-06-26,Verified
+CMP-80207,EMP7103,Alien Employment Permit (Work Authorization),PH,2026-06-04,Verified
+CMP-80208,EMP7103,SSS/PhilHealth registration,PH,2026-05-24,Verified
+CMP-80209,EMP7104,EPF/SOCSO registration,MY,2026-06-01,Submitted
+CMP-80210,EMP7104,Signed employment contract,MY,2026-05-21,Verified
+CMP-80211,EMP7105,Right-to-Work (VEVO) check,AU,2026-08-01,Verified
+CMP-80212,EMP7105,TFN declaration,AU,2026-08-01,Submitted
+CMP-80213,EMP7106,Alien Employment Permit (Work Authorization),PH,2026-08-10,Submitted
+CMP-80214,EMP7106,SSS/PhilHealth registration,PH,2026-07-30,Verified
+CMP-80215,EMP7107,Right-to-Work (VEVO) check,AU,2026-05-24,Submitted
+CMP-80216,EMP7107,TFN declaration,AU,2026-05-28,Verified
+CMP-80217,EMP7108,Employment Pass (Work Authorization),SG,2026-08-24,Verified
+CMP-80218,EMP7108,Signed employment contract,SG,2026-08-17,Verified
+CMP-80219,EMP7109,Employment Pass (Work Authorization),SG,2026-06-12,Submitted
+CMP-80220,EMP7109,Signed employment contract,SG,2026-06-05,Submitted
+CMP-80221,EMP7110,FRRO registration (Work Authorization),IN,2026-08-06,Verified
+CMP-80222,EMP7110,PF/UAN declaration,IN,2026-08-02,Verified
+CMP-80223,EMP7111,Alien Employment Permit (Work Authorization),PH,2026-06-20,Verified
+CMP-80224,EMP7111,SSS/PhilHealth registration,PH,2026-06-24,Verified
+CMP-80225,EMP7112,EPF/SOCSO registration,MY,2026-07-31,Verified
+CMP-80226,EMP7112,Signed employment contract,MY,2026-07-31,Verified
+CMP-80227,EMP7113,Alien Employment Permit (Work Authorization),PH,2026-07-17,Verified
+CMP-80228,EMP7113,SSS/PhilHealth registration,PH,2026-07-28,Missing
+CMP-80229,EMP7114,EPF/SOCSO registration,MY,2026-07-24,Submitted
+CMP-80230,EMP7114,Signed employment contract,MY,2026-07-27,Submitted
+CMP-80231,EMP7115,Employment Pass (Work Authorization),SG,2026-08-10,Submitted
+CMP-80232,EMP7115,Signed employment contract,SG,2026-07-30,Verified
+CMP-80233,EMP7116,EPF/SOCSO registration,MY,2026-07-02,Verified
+CMP-80234,EMP7116,Signed employment contract,MY,2026-07-06,Verified
+CMP-80235,EMP7117,FRRO registration (Work Authorization),IN,2026-06-12,Verified
+CMP-80236,EMP7117,PF/UAN declaration,IN,2026-06-15,Verified
+CMP-80237,EMP7118,Employment Pass (Work Authorization),SG,2026-08-13,Missing
+CMP-80238,EMP7118,Signed employment contract,SG,2026-08-24,Verified
+CMP-80239,EMP7119,Employment Pass (Work Authorization),SG,2026-07-26,Verified
+CMP-80240,EMP7119,Signed employment contract,SG,2026-07-19,Verified
+CMP-80241,EMP7120,EPF/SOCSO registration,MY,2026-06-17,Verified
+CMP-80242,EMP7120,Signed employment contract,MY,2026-06-13,Verified
+CMP-80243,EMP7121,Alien Employment Permit (Work Authorization),PH,2026-06-17,Verified
+CMP-80244,EMP7121,SSS/PhilHealth registration,PH,2026-06-13,Verified
+CMP-80245,EMP7122,Right-to-Work (VEVO) check,AU,2026-08-26,Verified
+CMP-80246,EMP7122,TFN declaration,AU,2026-08-22,Missing
+CMP-80247,EMP7123,Right-to-Work (VEVO) check,AU,2026-07-01,Submitted
+CMP-80248,EMP7123,TFN declaration,AU,2026-07-01,Verified
+CMP-80249,EMP7124,FRRO registration (Work Authorization),IN,2026-07-23,Verified
+CMP-80250,EMP7124,PF/UAN declaration,IN,2026-07-23,Verified
+CMP-80251,EMP7125,EPF/SOCSO registration,MY,2026-07-30,Verified
+CMP-80252,EMP7125,Signed employment contract,MY,2026-07-23,Submitted
+CMP-80253,EMP7126,FRRO registration (Work Authorization),IN,2026-08-22,Submitted
+CMP-80254,EMP7126,PF/UAN declaration,IN,2026-08-22,Verified
+CMP-80255,EMP7127,FRRO registration (Work Authorization),IN,2026-08-07,Verified
+CMP-80256,EMP7127,PF/UAN declaration,IN,2026-08-10,Missing
+CMP-80257,EMP7128,Right-to-Work (VEVO) check,AU,2026-07-03,Missing
+CMP-80258,EMP7128,TFN declaration,AU,2026-07-14,Verified
+CMP-80259,EMP7129,EPF/SOCSO registration,MY,2026-08-25,Verified
+CMP-80260,EMP7129,Signed employment contract,MY,2026-08-18,Verified
+CMP-80261,EMP7130,Right-to-Work (VEVO) check,AU,2026-07-27,Verified
+CMP-80262,EMP7130,TFN declaration,AU,2026-07-27,Verified
+CMP-80263,EMP7131,EPF/SOCSO registration,MY,2026-06-01,Verified
+CMP-80264,EMP7131,Signed employment contract,MY,2026-06-05,Verified
+CMP-80265,EMP7132,Right-to-Work (VEVO) check,AU,2026-05-11,Submitted
+CMP-80266,EMP7132,TFN declaration,AU,2026-05-15,Verified
+CMP-80267,EMP7133,Right-to-Work (VEVO) check,AU,2026-05-23,Verified
+CMP-80268,EMP7133,TFN declaration,AU,2026-06-03,Verified
+CMP-80269,EMP7134,Right-to-Work (VEVO) check,AU,2026-06-26,Missing
+CMP-80270,EMP7134,TFN declaration,AU,2026-06-26,Verified
+CMP-80271,EMP7135,EPF/SOCSO registration,MY,2026-08-20,Submitted
+CMP-80272,EMP7135,Signed employment contract,MY,2026-08-27,Submitted
+CMP-80273,EMP7136,Right-to-Work (VEVO) check,AU,2026-06-02,Missing
+CMP-80274,EMP7136,TFN declaration,AU,2026-05-22,Verified
+CMP-80275,EMP7137,Employment Pass (Work Authorization),SG,2026-08-03,Verified
+CMP-80276,EMP7137,Signed employment contract,SG,2026-08-03,Verified
+CMP-80277,EMP7138,EPF/SOCSO registration,MY,2026-06-14,Verified
+CMP-80278,EMP7138,Signed employment contract,MY,2026-06-07,Missing
+CMP-80279,EMP7139,Right-to-Work (VEVO) check,AU,2026-07-12,Verified
+CMP-80280,EMP7139,TFN declaration,AU,2026-07-16,Verified
+CMP-80281,EMP7140,Right-to-Work (VEVO) check,AU,2026-07-21,Verified
+CMP-80282,EMP7140,TFN declaration,AU,2026-07-28,Verified
+CMP-80283,EMP7141,EPF/SOCSO registration,MY,2026-07-25,Verified
+CMP-80284,EMP7141,Signed employment contract,MY,2026-07-22,Verified
+CMP-80285,EMP7142,FRRO registration (Work Authorization),IN,2026-07-22,Verified
+CMP-80286,EMP7142,PF/UAN declaration,IN,2026-07-18,Submitted
+CMP-80287,EMP7143,Alien Employment Permit (Work Authorization),PH,2026-06-20,Verified
+CMP-80288,EMP7143,SSS/PhilHealth registration,PH,2026-06-24,Submitted
+CMP-80289,EMP7144,Employment Pass (Work Authorization),SG,2026-05-31,Submitted
+CMP-80290,EMP7144,Signed employment contract,SG,2026-05-24,Verified
+CMP-80291,EMP7145,FRRO registration (Work Authorization),IN,2026-08-28,Verified
+CMP-80292,EMP7145,PF/UAN declaration,IN,2026-08-21,Verified
+CMP-80293,EMP7146,Alien Employment Permit (Work Authorization),PH,2026-08-25,Verified
+CMP-80294,EMP7146,SSS/PhilHealth registration,PH,2026-08-21,Verified
+CMP-80295,EMP7147,Employment Pass (Work Authorization),SG,2026-05-11,Submitted
+CMP-80296,EMP7147,Signed employment contract,SG,2026-05-18,Verified
+CMP-80297,EMP7148,EPF/SOCSO registration,MY,2026-08-28,Submitted
+CMP-80298,EMP7148,Signed employment contract,MY,2026-08-17,Verified
+CMP-80299,EMP7149,Employment Pass (Work Authorization),SG,2026-06-29,Verified
+CMP-80300,EMP7149,Signed employment contract,SG,2026-07-03,Verified

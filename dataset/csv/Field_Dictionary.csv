@@ -1,0 +1,13 @@
+Sheet,Description,Class
+Workers,"Workday worker report. Employee_ID, Worker_WID, Job_Profile, Job_Family, Manager_WID, Cost_Center, Hire_Date drives the 90-day clock. R2 adds jurisdiction, time_zone, work_auth_expiry (blank=local, dated=visa holder), cohort.",master
+Onboarding_Tasks,"Workday onboarding business-process steps. Milestone Day 1..Day 90, Status Not Started/In Progress/Completed/Escalated. Completed_Date sometimes after Due_Date.",transactional
+Provisioning_Integration,Workday->IT provisioning feed. Resource Laptop/Email/Badge/VPN/System Access; Blocked past start = missing day-one access. blank Fulfilled_On when Blocked/Requested.,transactional
+Peakon_Engagement,"Workday Peakon Employee Voice. Score 0-10, Comment (sensitive disclosures here), blank Submitted_At = non-response. R2 adds sentiment, x_confidential (true=route confidentially, never on dashboard), manager_response_days (blank=no/late response).",transactional
+Manager_Directory,Managers for escalation/nudges (Manager_WID). A few Workers.Manager_WID intentionally do not resolve here.,master
+Locations_Entities,Legal entities and jurisdictions hires belong to; compliance rules and timezones differ by location.,master
+Compliance_Items,Work authorization / right-to-work / contract docs with legal deadlines per jurisdiction. status Missing/Submitted/Verified. Missing + near due_date = legal breach risk.,transactional
+Payroll_Records,First-pay details per hire. status Paid/Error/Pending; status Error with error_reason = first-cycle payroll failure.,transactional
+Learning_Milestones,Required training by day (Day 7/Day 30/Day 60). status Completed/In Progress/Not Started.,transactional
+Attrition_History,"Prior leaver patterns (job_family, tenure_days, left_flag, reason) for risk scoring. Aggregate synthetic history, NOT tied to current hires.",reference
+Cross_Team_Dependencies,IT/Payroll/Facilities/Security steps that gate day one. status Done/In Progress/Blocked; blocks_day_one flag.,transactional
+SEEDED TRAP TYPES,"R1: missing day-one access · stalled compliance doc · disengaged hire · sensitive disclosure in a pulse. R2 adds: compliance doc Missing for a jurisdiction with a hard legal deadline · first-cycle payroll Error nobody flagged · sensitive disclosure with x_confidential=true (confidential route only) · cohort-wide provisioning bottleneck (one resource Blocked for many hires) · remote hire in a distant timezone whose cadence/deadlines shift · non-responsive manager who ignores nudges for an at-risk hire · false-positive risk signal (low score, benign comment) that should NOT escalate.",note
