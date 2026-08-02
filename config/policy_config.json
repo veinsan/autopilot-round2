@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "as_of_date": null,
+  "demo_mode": false,
+  "thresholds": {
+    "provisioning_blocked_grace_days": 1,
+    "task_stalled_overdue_days": 3,
+    "compliance_step_terms": [
+      "Compliance training assigned",
+      "Compliance Document signed"
+    ],
+    "engagement_low_score": 5,
+    "disclosure_classifier_min_confidence": 0.75,
+    "dedup_confidence_threshold": 0.9,
+    "dedup_flag_band_low": 0.7,
+    "dedup_hire_date_proximity_days": 3,
+    "catch_rate_sla_days": 3
+  },
+  "normalization": {
+    "date_formats_accepted": [
+      "%Y-%m-%d %H:%M:%S",
+      "%Y-%m-%d %H:%M:%S.%f",
+      "%Y-%m-%dT%H:%M:%S",
+      "%Y-%m-%dT%H:%M:%S.%f",
+      "%Y-%m-%d %H:%M",
+      "%Y-%m-%d",
+      "%Y/%m/%d",
+      "%b %d %Y",
+      "%b %d, %Y",
+      "%B %d %Y",
+      "%B %d, %Y",
+      "%d %b %Y",
+      "%d %B %Y"
+    ],
+    "ambiguous_numeric_date_order": "DMY"
+  },
+  "routing": {
+    "manager_channel_by_org": {
+      "Finance": "C0BJA0P1M6V",
+      "Sales": "C0BJBQ02U2Y",
+      "Ops": "C0BHSMV328P",
+      "Engineering": "C0BJ4PYGV5K",
+      "People": "C0BJ4PZ8961"
+    },
+    "confidential_channel": "C0BK2CRJ596",
+    "it_escalation_channel": "C0BJ839B24A"
+  },
+  "templates": {
+    "manager_nudge": "Onboarding check-in needed: {{preferred_name}} ({{employee_id}}), day {{day_number}} of 90. Signal: {{reason_summary}}. Please check in with your new hire and update the onboarding task tracker. Case {{case_id}}.",
+    "it_escalation": "Provisioning risk for {{employee_id}}: {{reason_summary}}. Affected resource(s): {{resource_list}}, requested {{requested_on}} and still unfulfilled. Please action or update the request status. Case {{case_id}}.",
+    "confidential_alert": "Confidential: a new-hire pulse response requires HR review ({{employee_id}}, milestone {{milestone}}). Details are available only in the linked Workbench case: {{case_link}}. Please do not discuss outside this channel."
+  },
+  "retry": {
+    "max_attempts": 3,
+    "backoff_seconds": [5, 20, 60]
+  },
+  "retry_demo_profile": {
+    "max_attempts": 1,
+    "backoff_seconds": []
+  }
+}
