@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Workflow"
+  short_description: "Repository workflow and coding conventions"
+  default_prompt: "Use $project-workflow to implement and verify a change in this repository."
