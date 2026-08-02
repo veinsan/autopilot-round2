@@ -63,6 +63,8 @@ const navItems: NavSection[] = [
     items: [
       { href: '/', label: 'Dashboard', icon: Icons.dashboard },
       { href: '/workbench', label: 'Workbench', icon: Icons.workbench },
+      { href: '/policies', label: 'Policy Studio', icon: Icons.layers },
+      { href: '/data-manager', label: 'Data Manager', icon: Icons.activity },
     ],
   },
   {

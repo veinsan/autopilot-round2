@@ -41,6 +41,7 @@ from .routers import (
     auth_router,
     examples_router,
     health_router,
+    hr_router,
     items_router,
 )
 from .security import get_current_user, verify_access
@@ -153,6 +154,9 @@ api_router.include_router(items_router)
 
 # Authorization pattern examples
 api_router.include_router(examples_router)
+
+# HR & People Ops Command Center
+api_router.include_router(hr_router)
 
 
 # =============================================================================

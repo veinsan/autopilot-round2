@@ -31,6 +31,9 @@ COPY alembic.ini ./
 COPY scripts ./scripts/
 COPY start_gunicorn.sh ./
 
+# The repository is often edited on Windows; normalize the POSIX entrypoint
+# inside the Linux image so a CRLF checkout cannot crash the backend at boot.
+RUN sed -i 's/\r$//' start_gunicorn.sh
 RUN chmod -R 755 /app/*/
 # Make scripts executable
 RUN chmod +x start_gunicorn.sh utils/wait_for_db.py 2>/dev/null || true
