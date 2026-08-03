@@ -106,3 +106,39 @@ credentials or confidential payloads.
 
 - Mistake: a PowerShell inspection passed `frontend/tailwind.config.*` directly to `rg`, which Windows treated as an invalid literal path.
 - Prevention: discover matching files with `rg --files` first, or search the containing directory with a glob filter such as `-g 'tailwind.config.*'`.
+
+### Verify identity infrastructure before recommending Admin UI provisioning
+
+- Mistake: role creation through `/admin/roles` was recommended without first confirming that `AUTH_BYPASS` was disabled, Keycloak was configured, and `app/services/keycloak_admin.py` existed. The visible UI called a deliberate 501 stub.
+- Prevention: inspect the effective auth mode, Compose services, required environment names, and admin-service implementation before treating an identity-management screen as functional.
+
+### Validate runtime secrets at runtime, not during Next.js route collection
+
+- Mistake: a top-level `NEXTAUTH_SECRET` assertion in the NextAuth route made the standard host production build fail because the root runtime `.env` is not loaded by a build launched from `frontend/`.
+- Prevention: allow a build-only placeholder during compilation and fail the production container entrypoint when the runtime secret is absent.
+
+### Prefer the actual service container for identity smoke tests
+
+- Mistake: a piped inline Python smoke test used `docker compose run --rm` and timed out before producing evidence, conflating one-off container startup/stdio behavior with Keycloak client health.
+- Prevention: recreate the real backend with the intended environment, then run bounded checks inside it; independently verify Keycloak REST readiness from the host.
+
+### Keep optional-file probes out of required inspection batches
+
+- Mistake: an auth audit batched real files with optional dependency paths that did not exist; the expected miss returned exit code 1 and obscured otherwise useful output.
+- Prevention: discover optional paths first, then run required reads separately or explicitly normalize expected no-match exits.
+- Recurrence: the same mistake later used an assumed `tests/test_auth_bypass.py` path in a parallel verification batch. Treat test-file discovery as mandatory, not optional, before every targeted pytest command.
+
+### Do not truncate Docker manifest output with a terminating pipeline
+
+- Mistake: piping `docker manifest inspect` into `Select-Object -First` closed stdout early and made Docker return exit code 1 even though the image manifest existed.
+- Prevention: capture the full manifest first, then inspect the parsed or stored result without terminating the producer's stream.
+
+### Use a header-oriented client for expected redirect checks
+
+- Mistake: `Invoke-WebRequest -MaximumRedirection 0` raised an internal PowerShell null-reference error while checking a valid Next.js 307 response, obscuring the application result.
+- Prevention: use `curl.exe -I` (or another client that exposes redirect headers without following them) when the expected evidence is an HTTP status and `Location` header.
+
+### Match OAuth smoke tests to the framework response contract
+
+- Mistake: an over-complex inline PowerShell/curl command for the NextAuth CSRF flow was rejected by command policy, and the first replacement assumed the sign-in endpoint returned a redirect even though `json=true` returns HTTP 200 with the authorization URL in JSON.
+- Prevention: use a small in-memory Node request sequence for CSRF-protected NextAuth checks, and validate `payload.url` when JSON mode is requested.

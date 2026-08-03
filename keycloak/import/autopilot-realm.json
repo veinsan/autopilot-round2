@@ -1,0 +1,109 @@
+{
+  "realm": "autopilot",
+  "displayName": "AutoPilot Command Center",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "eventsEnabled": true,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+  "roles": {
+    "realm": [
+      { "name": "admin", "description": "Command Center administrator" },
+      { "name": "user", "description": "Approved Command Center user" },
+      { "name": "pending", "description": "User awaiting approval" },
+      { "name": "people_ops", "description": "General People Operations" },
+      { "name": "people_ops_payroll", "description": "Restricted first-payroll reviewer" },
+      { "name": "people_ops_confidential", "description": "Restricted confidential-case reviewer" },
+      { "name": "manager", "description": "Manager with direct-report scope" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "autopilot-command-center",
+      "name": "AutoPilot Command Center",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "frontchannelLogout": true,
+      "rootUrl": "http://localhost:3001",
+      "baseUrl": "http://localhost:3001",
+      "adminUrl": "http://frontend:3000",
+      "redirectUris": ["http://localhost:3001/api/auth/callback/keycloak"],
+      "webOrigins": ["http://localhost:3001"],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:3001/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "command-center-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "autopilot-command-center",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ],
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "basic", "email"],
+      "optionalClientScopes": ["address", "phone", "offline_access", "microprofile-jwt"]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-autopilot-command-center",
+      "enabled": true,
+      "serviceAccountClientId": "autopilot-command-center",
+      "clientRoles": { "realm-management": ["realm-admin"] }
+    },
+    {
+      "username": "${APP_ADMIN_USERNAME}",
+      "email": "${APP_ADMIN_EMAIL}",
+      "firstName": "Command",
+      "lastName": "Administrator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        { "type": "password", "value": "${APP_ADMIN_PASSWORD}", "temporary": false }
+      ],
+      "realmRoles": ["admin", "user"]
+    },
+    {
+      "username": "${PAYROLL_USERNAME}",
+      "email": "${PAYROLL_EMAIL}",
+      "firstName": "Payroll",
+      "lastName": "Reviewer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        { "type": "password", "value": "${PAYROLL_PASSWORD}", "temporary": false }
+      ],
+      "realmRoles": ["people_ops_payroll", "user"]
+    }
+  ]
+}

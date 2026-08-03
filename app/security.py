@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 # --- Configuration ---
 # Keycloak configuration for JWT-based authentication
 KEYCLOAK_SERVER_URL = os.getenv("KEYCLOAK_SERVER_URL")
+KEYCLOAK_PUBLIC_URL = os.getenv("KEYCLOAK_PUBLIC_URL", KEYCLOAK_SERVER_URL or "")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM")
 KEYCLOAK_AUDIENCE = os.getenv("KEYCLOAK_AUDIENCE")
 KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID")
@@ -38,6 +39,14 @@ _BYPASS_USER = {
 # Ensure no trailing slash
 if KEYCLOAK_SERVER_URL and KEYCLOAK_SERVER_URL.endswith("/"):
     KEYCLOAK_SERVER_URL = KEYCLOAK_SERVER_URL.rstrip("/")
+if KEYCLOAK_PUBLIC_URL.endswith("/"):
+    KEYCLOAK_PUBLIC_URL = KEYCLOAK_PUBLIC_URL.rstrip("/")
+
+
+def _expected_issuer() -> str:
+    if not KEYCLOAK_PUBLIC_URL or not KEYCLOAK_REALM:
+        raise ValueError("Keycloak public URL and realm must be configured")
+    return f"{KEYCLOAK_PUBLIC_URL}/realms/{KEYCLOAK_REALM}"
 
 
 def _get_keycloak_urls() -> tuple[str, str]:
@@ -81,7 +90,7 @@ def get_jwks():
     jwks_url, _ = _get_keycloak_urls()
     log.info(f"Fetching JWKS from: {jwks_url}")
     try:
-        response = requests.get(jwks_url)
+        response = requests.get(jwks_url, timeout=5)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -97,7 +106,7 @@ def introspect_token(token: str) -> dict:
         "token": token,
     }
     try:
-        response = requests.post(introspection_url, data=payload)
+        response = requests.post(introspection_url, data=payload, timeout=5)
         response.raise_for_status()
         introspection_result = response.json()
         if not introspection_result.get("active"):
@@ -105,11 +114,28 @@ def introspect_token(token: str) -> dict:
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Token is not active"
             )
         return introspection_result
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token introspection failed: {e}",
+            detail="Token introspection failed",
         )
+
+
+def _rsa_key_for_token(token: str) -> dict:
+    unverified_header = jwt.get_unverified_header(token)
+    if unverified_header.get("alg") != "RS256":
+        return {}
+    for refresh in (False, True):
+        if refresh:
+            get_jwks.cache_clear()
+        for key in get_jwks().get("keys", []):
+            if key.get("kid") == unverified_header.get("kid"):
+                return {
+                    name: key[name]
+                    for name in ("kty", "kid", "use", "n", "e")
+                    if name in key
+                }
+    return {}
 
 
 def get_current_user(token: str | None = Depends(oauth2_scheme)) -> dict | None:
@@ -128,25 +154,19 @@ def get_current_user(token: str | None = Depends(oauth2_scheme)) -> dict | None:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        unverified_header = jwt.get_unverified_header(token)
-        jwks = get_jwks()
-        rsa_key = {}
-        for key in jwks["keys"]:
-            if key["kid"] == unverified_header["kid"]:
-                rsa_key = {k: key[k] for k in ("kty", "kid", "use", "n", "e")}
-                break
+        rsa_key = _rsa_key_for_token(token)
         if not rsa_key:
             raise credentials_exception
 
-        jwt.decode(
+        decoded = jwt.decode(
             token,
             rsa_key,
-            algorithms=[unverified_header["alg"]],
+            algorithms=["RS256"],
             audience=KEYCLOAK_AUDIENCE,
-            issuer=f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}",
+            issuer=_expected_issuer(),
         )
-
-        return introspect_token(token)
+        introspect_token(token)
+        return decoded
     except JWTError as e:
         log.warning(f"JWT validation error: {e}")
         raise credentials_exception

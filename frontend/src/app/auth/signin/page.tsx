@@ -1,8 +1,8 @@
 'use client'
 
-import { signIn } from 'next-auth/react'
+import { getProviders, signIn } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useEffect } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CardWatermark } from '@/components/ui/card-watermark'
@@ -13,11 +13,23 @@ import { Logomark } from '@/components/brand'
 function SignInContent() {
   const searchParams = useSearchParams()
   const callbackUrl = searchParams.get('callbackUrl') || '/'
+  const [providerId, setProviderId] = useState<string | null>(null)
 
-  // Auto-sign-in: immediately authenticate as Dev User
   useEffect(() => {
-    signIn('autopilot-dev', { callbackUrl, redirect: true })
+    void getProviders().then((providers) => {
+      const selected = providers?.keycloak
+        ? 'keycloak'
+        : providers?.['autopilot-dev']
+          ? 'autopilot-dev'
+          : null
+      setProviderId(selected)
+      if (selected === 'autopilot-dev') {
+        void signIn(selected, { callbackUrl, redirect: true })
+      }
+    })
   }, [callbackUrl])
+
+  const isDev = providerId === 'autopilot-dev'
 
   return (
     <motion.div
@@ -29,62 +41,45 @@ function SignInContent() {
       <Card className='relative overflow-hidden bg-white shadow-float-lg'>
         <CardWatermark opacity={4} scale={1} />
         <CardHeader className='relative z-10 space-y-4 pb-8 text-center'>
-          <motion.div
-            className='mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-brand-navy shadow-xl'
-            initial={{ scale: 0, rotate: -180 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{
-              delay: 0.2,
-              type: 'spring',
-              stiffness: 200,
-              damping: 15,
-            }}
-          >
+          <div className='mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-brand-navy shadow-xl'>
             <Logomark variant='light' size={48} />
-          </motion.div>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3, duration: 0.4 }}
-          >
+          </div>
+          <div>
             <CardTitle className='text-display-5 font-bold text-brand-navy'>
               AutoPilot
             </CardTitle>
             <p className='mt-2 text-muted-foreground'>
-              Signing you in...
+              {isDev
+                ? 'Signing in with the local development identity…'
+                : 'Sign in to the HR Command Center'}
             </p>
-          </motion.div>
+          </div>
         </CardHeader>
         <CardContent className='relative z-10 space-y-4 px-8 pb-8'>
-          {/* Loading spinner while auto-signing in */}
-          <div className='flex justify-center py-4'>
-            <div className='h-8 w-8 animate-spin rounded-full border-4 border-brand-navy border-t-transparent' />
-          </div>
-          
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4, duration: 0.4 }}
-          >
+          {isDev ? (
+            <div className='flex justify-center py-4'>
+              <div className='h-8 w-8 animate-spin rounded-full border-4 border-brand-navy border-t-transparent' />
+            </div>
+          ) : (
             <Button
-              onClick={() => signIn('autopilot-dev', { callbackUrl, redirect: true })}
+              onClick={() =>
+                providerId &&
+                signIn(providerId, { callbackUrl, redirect: true })
+              }
               variant='gradient'
               size='lg'
-              className='group w-full py-6 text-base'
+              className='w-full py-6 text-base'
+              disabled={!providerId}
             >
-              Enter Command Center
-              <Icons.arrowRight className='ml-2 h-4 w-4 transition-transform duration-200 group-hover:translate-x-1' />
+              <Icons.shield className='mr-2 h-4 w-4' />
+              Sign in with Keycloak
             </Button>
-          </motion.div>
-
-          <motion.p
-            className='text-center text-xs text-muted-foreground'
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5, duration: 0.4 }}
-          >
-            Dev mode — no credentials required
-          </motion.p>
+          )}
+          {!providerId && (
+            <p className='text-center text-xs text-muted-foreground'>
+              Loading the identity provider…
+            </p>
+          )}
         </CardContent>
       </Card>
     </motion.div>

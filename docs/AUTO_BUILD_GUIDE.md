@@ -901,19 +901,19 @@ is not evidence.
 
 | ID | Workflow | Build step | Person A | Person B | Dependency | Build | Tests | Evidence / notes |
 |---|---|---|---|---|---|---|---|---|
-| G-01 | Policy Studio | Activate complete Round 2 policy | Review/activate | Validate contract | None | Draft live | Passed (69 focused) | `policy_round2_v1` matches canonical v2; human simulation, approval, and activation remain |
-| G-02 | Command Center | Restrict payroll case RBAC | Supply live route test | Implement RBAC | Backend | Done (code) | Passed (60 focused; 137 full) | Dedicated `people_ops_payroll`; deploy and provision the role before 6.3 |
-| G-03 | Command Center | Publish manager action-state contract | Supply Auto needs | Implement contract | Backend | Done (code) | Passed (unit + clean-install SQL smoke) | Apply `config/supabase_schema.sql` to live Supabase before 7.3 |
-| UI | Command Center | Policy Studio, Workbench, Dashboard, Data Manager | Build/live-test | Publish APIs | G-01/G-02/G-03 contracts | Done (code) | Production build passed | All user-facing copy is English; live gates remain as above |
-| 5.1 | OP-05 | Context/policy/timezone | Build | Fixture support | G-01 | Not started | Not started | |
+| G-01 | Policy Studio | Activate complete Round 2 policy | Review/activate | Validate contract | None | Done | Passed (69 focused) | `policy_round2_v1` is activated; user-confirmed live |
+| G-02 | Command Center | Restrict payroll case RBAC | Supply live route test | Implement RBAC | Backend | Done | Passed (60 focused; 144 full; live local JWT) | `people_ops_payroll` is provisioned separately; payroll token receives 403 from Admin APIs |
+| G-03 | Command Center | Publish manager action-state contract | Supply Auto needs | Implement contract | Backend | Done | Passed (unit + clean-install SQL smoke) | Latest additive schema was applied to live Supabase; user-confirmed |
+| UI | Command Center | Policy Studio, Workbench, Dashboard, Data Manager | Build/live-test | Publish APIs | G-01/G-02/G-03 contracts | Done | Production build and local Keycloak provider passed | All user-facing copy is English; protected pages redirect to sign-in |
+| 5.1 | OP-05 | Context/policy/timezone | Build | Fixture support | G-01 | Saved | Partial | Valid-employee test completed end-to-end; `EMP-NOT-FOUND` safely returns a system exception but currently receives Supabase REST 401 instead of `WORKER_NOT_FOUND`. |
 | 5.2 | OP-05 | Compliance/work-auth rules + logs | Build/test | Verify persisted log | 5.1 | Not started | Not started | |
 | 5.3 | OP-05 | Partial failure behavior | Build/test | Verify safe API result | 5.2 | Not started | Not started | |
-| 6.1 | OP-06 | Restricted context/read | Build/test | Privacy review | G-01 | Not started | Not started | |
+| 6.1 | OP-06 | Restricted context/read | Build/test | Privacy review | G-01 | Saved | Not started | Initial context/read workflow saved; privacy and fixture tests pending. |
 | 6.2 | OP-06 | Payroll rules + logs | Build/test | Verify persisted log | 6.1 | Not started | Not started | |
-| 6.3 | OP-06/OP-04 | Restricted payroll case route | Build after gate | Prove G-02 | G-02, 6.2 | Blocked | Not started | Do not bypass G-02 |
-| 7.1 | OP-07 | Dependencies + learning | Build/test | Fixture support | G-01 | Not started | Not started | |
+| 6.3 | OP-06/OP-04 | Restricted payroll case route | Build after gate | Prove G-02 | G-02, 6.2 | Ready after 6.2 | Not started | G-02 is satisfied; do not bypass the restricted route |
+| 7.1 | OP-07 | Dependencies + learning | Build/test | Fixture support | G-01 | Saved | Not started | Initial employee-mode workflow saved; dependency, learning, and privacy tests pending. |
 | 7.2 | OP-07 | Cohort bottlenecks | Build/test | Verify API parity | 7.1 | Not started | Not started | |
-| 7.3 | OP-07 | Manager state machine | Build after gate | Prove G-03 | G-03, 7.1 | Blocked | Not started | Do not infer from Peakon |
+| 7.3 | OP-07 | Manager state machine | Build after gate | Prove G-03 | G-03, 7.1 | Ready after 7.1 | Not started | G-03 is satisfied; do not infer from Peakon |
 | C.1 | OP-01 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Not started | Not started | |
 | C.2 | OP-02 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Not started | Not started | |
 | C.3 | OP-03 | Active-policy compatibility | Build/privacy regression | Verify policy log | G-01 | Not started | Not started | |

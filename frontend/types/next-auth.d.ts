@@ -25,5 +25,7 @@ declare module 'next-auth/jwt' {
     refreshToken?: string
     error?: string
     idToken?: string
+    roles?: string[]
+    sub?: string
   }
 }

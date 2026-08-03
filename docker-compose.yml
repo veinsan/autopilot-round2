@@ -2,6 +2,38 @@
 # AutoPilot Template — Docker Compose for local development
 
 services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD}
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      APP_ADMIN_USERNAME: ${APP_ADMIN_USERNAME}
+      APP_ADMIN_EMAIL: ${APP_ADMIN_EMAIL}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD}
+      PAYROLL_USERNAME: ${PAYROLL_USERNAME}
+      PAYROLL_EMAIL: ${PAYROLL_EMAIL}
+      PAYROLL_PASSWORD: ${PAYROLL_PASSWORD}
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./keycloak/import:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
   postgres:
     image: postgres:15-alpine
     environment:
@@ -43,6 +75,8 @@ services:
     env_file:
       - .env
     depends_on:
+      keycloak:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     networks:
@@ -56,7 +90,6 @@ services:
       target: prod
       args:
         - NEXTAUTH_URL=${NEXTAUTH_URL}
-        - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
         - NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH:-}
     ports:
@@ -66,7 +99,10 @@ services:
     env_file:
       - .env
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
     networks:
       - app-network
     restart: unless-stopped
@@ -78,6 +114,7 @@ services:
       start_period: 30s
 
 volumes:
+  keycloak_data:
   postgres_data:
   document_storage:
 
