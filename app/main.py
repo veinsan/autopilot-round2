@@ -24,6 +24,7 @@ AUDIT SYSTEM:
 - See app/models/audit.py for full documentation
 """
 
+import asyncio
 import io
 import logging
 import os
@@ -45,6 +46,7 @@ from .routers import (
     items_router,
 )
 from .security import get_current_user, verify_access
+from .services.reconciliation import reconciliation_loop
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +76,28 @@ app = FastAPI(
     redoc_url=f"{BASE_PATH}/api/redoc",
     openapi_url=f"{BASE_PATH}/api/openapi.json",
 )
+
+_reconciliation_stop: asyncio.Event | None = None
+_reconciliation_task: asyncio.Task | None = None
+
+
+@app.on_event("startup")
+async def start_auto_reconciliation() -> None:
+    global _reconciliation_stop, _reconciliation_task
+    if os.getenv("AUTO_RECONCILIATION_ENABLED", "true").lower() != "true":
+        return
+    _reconciliation_stop = asyncio.Event()
+    _reconciliation_task = asyncio.create_task(
+        reconciliation_loop(_reconciliation_stop), name="auto-run-reconciliation"
+    )
+
+
+@app.on_event("shutdown")
+async def stop_auto_reconciliation() -> None:
+    if _reconciliation_stop:
+        _reconciliation_stop.set()
+    if _reconciliation_task:
+        await _reconciliation_task
 
 # =============================================================================
 # MIDDLEWARE CONFIGURATION

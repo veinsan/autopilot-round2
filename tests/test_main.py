@@ -1,6 +1,6 @@
 # tests/test_main.py
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
@@ -12,17 +12,22 @@ async def test_health_check():
     """
     Tests the public health check endpoint.
     """
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
         response = await ac.get("/api/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
-async def test_unauthorized_access():
+async def test_unauthorized_access(monkeypatch: pytest.MonkeyPatch):
     """
     Tests that protected endpoints require authentication.
     """
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    monkeypatch.setattr("app.security.AUTH_BYPASS", False)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
         response = await ac.get("/api/test")
     assert response.status_code == 401
 

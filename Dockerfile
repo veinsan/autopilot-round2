@@ -29,6 +29,8 @@ COPY utils ./utils/
 COPY alembic ./alembic/
 COPY alembic.ini ./
 COPY scripts ./scripts/
+COPY config ./config/
+COPY dataset/csv ./dataset/csv/
 COPY start_gunicorn.sh ./
 
 # The repository is often edited on Windows; normalize the POSIX entrypoint

@@ -28,8 +28,12 @@ tokens, email bodies, or unredacted evidence in any finding or event.
 
 ## Event ledger
 
-Write only sanitized events to `workflow_events`. Use a stable `event_id` when
-available; set `execution_id` to the internal command ID for UI-triggered runs.
+Write only sanitized events to `workflow_events`. Use a stable `event_id` and
+`source_event_id` when available; set `execution_id` to the internal command ID
+for UI-triggered runs. Repeated delivery of the same source event must be an
+idempotent upsert, not a second event. Supabase assigns a monotonic
+`sequence_no`; browser reconnects send `Last-Event-ID` and FastAPI resumes after
+that sequence while emitting bounded live heartbeats.
 The browser consumes `GET /api/hr/runs/{command_id}/events`, never Supabase
 Realtime or Auto directly.
 
@@ -40,7 +44,15 @@ Realtime or Auto directly.
 - Allow only configured workflow IDs; the browser cannot choose a workflow or
   environment.
 - For UI runs, FastAPI creates `command_runs` before invoking Auto streaming.
+- Every UI `POST /api/hr/runs` includes a stable `Idempotency-Key` for that user
+  action. Reusing it with the same payload returns the existing command; reusing
+  it with a different payload is rejected.
+- UI requests may send only a registered `reason_code`; never forward a free
+  narrative as an Auto input or store it in the command ledger.
 - For scheduled and Typeform runs, Auto writes an event ledger row and FastAPI
-  reconciles run state through Auto's run-list/status API.
+  discovers and reconciles run state through Auto's run-list/status API.
+- FastAPI runs bounded reconciliation automatically under a Supabase-backed
+  single-worker lease; `POST /api/hr/runs/reconcile` remains an authorized
+  operational trigger, not the only recovery path.
 - Schedule the daily cohort sweep at 09:00 UTC. Apply due-date calculations in
   the worker jurisdiction timezone.
