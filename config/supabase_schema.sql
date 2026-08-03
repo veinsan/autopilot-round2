@@ -311,10 +311,50 @@ create table if not exists "identity_profiles" (
   "updated_at" timestamptz not null default now()
 );
 
+-- Server-owned OP-07 manager accountability state.  The event ledger is the
+-- idempotency boundary; the state row is the current safe projection Auto reads.
+create table if not exists "manager_action_states" (
+  "case_id" text primary key references "workbench_cases"("case_id"),
+  "employee_id" text not null,
+  "current_state" text not null check ("current_state" in (
+    'nudge_created', 'delivered', 'acknowledged', 'action_verified', 'escalated'
+  )),
+  "nudge_created_at" timestamptz not null,
+  "delivered_at" timestamptz,
+  "acknowledged_at" timestamptz,
+  "action_verified_at" timestamptz,
+  "escalated_at" timestamptz,
+  "successful_reminder_count" integer not null default 0
+    check ("successful_reminder_count" >= 0),
+  "next_reminder_at" timestamptz,
+  "acknowledgment_deadline" timestamptz not null,
+  "action_deadline" timestamptz not null,
+  "source_event_id" text not null,
+  "updated_at" timestamptz not null default now()
+);
+
+create table if not exists "manager_action_events" (
+  "source_event_id" text primary key,
+  "case_id" text not null references "manager_action_states"("case_id"),
+  "event_type" text not null check ("event_type" in (
+    'nudge_created', 'delivery_succeeded', 'delivery_failed',
+    'acknowledged', 'action_verified', 'escalated'
+  )),
+  "delivery_result" text not null check ("delivery_result" in (
+    'succeeded', 'failed', 'not_applicable'
+  )),
+  "system_exception_code" text,
+  "occurred_at" timestamptz not null,
+  "recorded_at" timestamptz not null default now()
+);
+
 create index if not exists policy_versions_status_idx on "policy_versions" ("status", "created_at" desc);
 create index if not exists policy_simulations_version_idx on "policy_simulations" ("version_id", "created_at" desc);
 create index if not exists command_runs_status_idx on "command_runs" ("status", "created_at" desc);
 create index if not exists identity_profiles_employee_idx on "identity_profiles" ("employee_id");
+create index if not exists manager_action_states_employee_idx on "manager_action_states" ("employee_id", "updated_at" desc);
+create index if not exists manager_action_states_due_idx on "manager_action_states" ("current_state", "next_reminder_at");
+create index if not exists manager_action_events_case_idx on "manager_action_events" ("case_id", "occurred_at");
 
 do $$
 begin
@@ -339,6 +379,37 @@ begin
   ) then
     raise exception 'Migration blocked: duplicate command idempotency key requires review';
   end if;
+end;
+$$;
+
+-- Reject restricted payroll fields even when a controlled Auto writer bypasses
+-- RLS.  NOT VALID constraints below preserve legacy rows but protect new writes.
+create or replace function public.hr_payload_has_restricted_payroll_key(payload jsonb)
+returns boolean
+language plpgsql
+immutable
+set search_path = public
+as $$
+declare
+  member record;
+  element jsonb;
+begin
+  if payload is null then return false; end if;
+  if jsonb_typeof(payload) = 'object' then
+    for member in select key, value from jsonb_each(payload) loop
+      if lower(member.key) in ('error_reason', 'gross', 'net')
+         or public.hr_payload_has_restricted_payroll_key(member.value) then
+        return true;
+      end if;
+    end loop;
+  elsif jsonb_typeof(payload) = 'array' then
+    for element in select value from jsonb_array_elements(payload) loop
+      if public.hr_payload_has_restricted_payroll_key(element) then
+        return true;
+      end if;
+    end loop;
+  end if;
+  return false;
 end;
 $$;
 create unique index if not exists policy_versions_one_active_idx on "policy_versions" (("status")) where "status" = 'active';
@@ -385,6 +456,14 @@ begin
   if not exists (select 1 from pg_constraint where conname = 'command_runs_reconciliation_status_chk') then
     alter table "command_runs" add constraint command_runs_reconciliation_status_chk
       check ("reconciliation_status" in ('pending', 'required', 'complete')) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'workbench_cases_no_payroll_detail_chk') then
+    alter table "workbench_cases" add constraint workbench_cases_no_payroll_detail_chk
+      check (not public.hr_payload_has_restricted_payroll_key("sanitized_context")) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'workflow_events_no_payroll_detail_chk') then
+    alter table "workflow_events" add constraint workflow_events_no_payroll_detail_chk
+      check (not public.hr_payload_has_restricted_payroll_key("details")) not valid;
   end if;
 end;
 $$;
@@ -544,6 +623,175 @@ $$;
 revoke all on function public.record_case_action(text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.record_case_action(text, text, text, text, text) to service_role;
 
+-- Apply one authoritative manager-action event.  Locking the standard case
+-- serializes competing deliveries; source_event_id makes retries idempotent.
+create or replace function public.record_manager_action_event(
+  target_case_id text,
+  new_source_event_id text,
+  new_event_type text,
+  event_occurred_at timestamptz,
+  new_next_reminder_at timestamptz default null,
+  new_acknowledgment_deadline timestamptz default null,
+  new_action_deadline timestamptz default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  case_employee_id text;
+  case_domain text;
+  case_status text;
+  existing_case_id text;
+  existing_event_type text;
+  state_value text;
+  created_at_value timestamptz;
+  delivered_at_value timestamptz;
+  acknowledged_at_value timestamptz;
+  reminder_count integer;
+  result jsonb;
+begin
+  if new_source_event_id is null or btrim(new_source_event_id) = ''
+     or event_occurred_at is null then
+    raise exception 'Manager action event requires an ID and timestamp';
+  end if;
+  if new_event_type not in (
+    'nudge_created', 'delivery_succeeded', 'delivery_failed',
+    'acknowledged', 'action_verified', 'escalated'
+  ) then
+    raise exception 'Unsupported manager action event';
+  end if;
+
+  select "employee_id", lower("case_type"), "status"
+    into case_employee_id, case_domain, case_status
+    from "workbench_cases" where "case_id" = target_case_id for update;
+  if not found then raise exception 'Standard case not found'; end if;
+  if case_employee_id is null then raise exception 'Manager action requires an employee'; end if;
+  if case_domain = 'payroll' then raise exception 'Payroll case cannot enter manager action state'; end if;
+  if case_status = 'resolved' then raise exception 'Resolved case cannot enter manager action state'; end if;
+
+  select e."case_id", e."event_type"
+    into existing_case_id, existing_event_type
+    from "manager_action_events" e
+    where e."source_event_id" = new_source_event_id;
+  if found then
+    if existing_case_id <> target_case_id or existing_event_type <> new_event_type then
+      raise exception 'source_event_id belongs to a different manager action';
+    end if;
+    select to_jsonb(s) into result from "manager_action_states" s
+      where s."case_id" = target_case_id;
+    return result || jsonb_build_object('idempotent_replay', true);
+  end if;
+
+  if new_event_type = 'nudge_created' then
+    if new_next_reminder_at is null or new_acknowledgment_deadline is null
+       or new_action_deadline is null then
+      raise exception 'nudge_created requires all deadlines';
+    end if;
+    if not (
+      event_occurred_at <= new_next_reminder_at
+      and new_next_reminder_at <= new_acknowledgment_deadline
+      and new_acknowledgment_deadline <= new_action_deadline
+    ) then
+      raise exception 'Manager action deadlines must be chronological';
+    end if;
+    if exists (select 1 from "manager_action_states" where "case_id" = target_case_id) then
+      raise exception 'Manager action state already exists';
+    end if;
+    insert into "manager_action_states" (
+      "case_id", "employee_id", "current_state", "nudge_created_at",
+      "successful_reminder_count", "next_reminder_at",
+      "acknowledgment_deadline", "action_deadline", "source_event_id"
+    ) values (
+      target_case_id, case_employee_id, 'nudge_created', event_occurred_at,
+      0, new_next_reminder_at, new_acknowledgment_deadline,
+      new_action_deadline, new_source_event_id
+    );
+  else
+    select "current_state", "nudge_created_at", "delivered_at",
+           "acknowledged_at", "successful_reminder_count"
+      into state_value, created_at_value, delivered_at_value,
+           acknowledged_at_value, reminder_count
+      from "manager_action_states" where "case_id" = target_case_id for update;
+    if not found then raise exception 'nudge_created must be recorded first'; end if;
+    if event_occurred_at < created_at_value then
+      raise exception 'Manager action event predates its nudge';
+    end if;
+
+    if new_event_type in ('delivery_succeeded', 'delivery_failed') then
+      if state_value not in ('nudge_created', 'delivered') then
+        raise exception 'Delivery is not valid in the current manager action state';
+      end if;
+      update "manager_action_states" set
+        "current_state" = case when new_event_type = 'delivery_succeeded'
+          then 'delivered' else "current_state" end,
+        "delivered_at" = case when new_event_type = 'delivery_succeeded'
+          then coalesce("delivered_at", event_occurred_at) else "delivered_at" end,
+        "successful_reminder_count" = "successful_reminder_count"
+          + case when new_event_type = 'delivery_succeeded' then 1 else 0 end,
+        "next_reminder_at" = coalesce(new_next_reminder_at, "next_reminder_at"),
+        "source_event_id" = new_source_event_id,
+        "updated_at" = now()
+        where "case_id" = target_case_id;
+    elsif new_event_type = 'acknowledged' then
+      if state_value <> 'delivered' or event_occurred_at < delivered_at_value then
+        raise exception 'Acknowledgment requires a confirmed delivery';
+      end if;
+      update "manager_action_states" set
+        "current_state" = 'acknowledged', "acknowledged_at" = event_occurred_at,
+        "next_reminder_at" = null, "source_event_id" = new_source_event_id,
+        "updated_at" = now()
+        where "case_id" = target_case_id;
+    elsif new_event_type = 'action_verified' then
+      if state_value <> 'acknowledged' or event_occurred_at < acknowledged_at_value then
+        raise exception 'Verified action requires acknowledgment';
+      end if;
+      update "manager_action_states" set
+        "current_state" = 'action_verified', "action_verified_at" = event_occurred_at,
+        "next_reminder_at" = null, "source_event_id" = new_source_event_id,
+        "updated_at" = now()
+        where "case_id" = target_case_id;
+    elsif new_event_type = 'escalated' then
+      if state_value not in ('delivered', 'acknowledged') then
+        raise exception 'Escalation requires delivered or acknowledged state';
+      end if;
+      update "manager_action_states" set
+        "current_state" = 'escalated', "escalated_at" = event_occurred_at,
+        "next_reminder_at" = null, "source_event_id" = new_source_event_id,
+        "updated_at" = now()
+        where "case_id" = target_case_id;
+    end if;
+  end if;
+
+  insert into "manager_action_events" (
+    "source_event_id", "case_id", "event_type", "delivery_result",
+    "system_exception_code", "occurred_at"
+  ) values (
+    new_source_event_id, target_case_id, new_event_type,
+    case new_event_type
+      when 'delivery_succeeded' then 'succeeded'
+      when 'delivery_failed' then 'failed'
+      else 'not_applicable'
+    end,
+    case when new_event_type = 'delivery_failed'
+      then 'MANAGER_NOTIFICATION_DELIVERY_FAILED' else null end,
+    event_occurred_at
+  );
+
+  select to_jsonb(s) into result from "manager_action_states" s
+    where s."case_id" = target_case_id;
+  if new_event_type = 'delivery_failed' then
+    result := result || jsonb_build_object(
+      'system_exception_code', 'MANAGER_NOTIFICATION_DELIVERY_FAILED'
+    );
+  end if;
+  return result || jsonb_build_object('idempotent_replay', false);
+end;
+$$;
+revoke all on function public.record_manager_action_event(text, text, text, timestamptz, timestamptz, timestamptz, timestamptz) from public, anon, authenticated;
+grant execute on function public.record_manager_action_event(text, text, text, timestamptz, timestamptz, timestamptz, timestamptz) to service_role;
+
 -- Persisting simulation evidence and advancing draft -> simulated is atomic.
 create or replace function public.record_policy_simulation(
   new_simulation_id text,
@@ -675,7 +923,8 @@ begin
     'policy_versions', 'policy_evaluations', 'workflow_events',
     'workbench_cases', 'Confidential_Cases', 'case_resolutions',
     'integration_health', 'policy_simulations', 'policy_approvals',
-    'command_runs', 'identity_profiles', 'reconciliation_leases'
+    'command_runs', 'identity_profiles', 'reconciliation_leases',
+    'manager_action_states', 'manager_action_events'
   ] loop
     execute format('alter table public.%I enable row level security', table_name);
   end loop;

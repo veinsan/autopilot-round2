@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from ..schemas.hr import (
     CaseActionRequest,
+    ManagerActionEventRequest,
     PolicyApprovalRequest,
     PolicyDraftRequest,
     PolicySimulationRequest,
@@ -25,6 +26,8 @@ from ..services.hr import (
     HROpsService,
     KNOWN_REASON_CODES,
     assert_manager_owns_employee,
+    can_access_payroll_cases,
+    case_domain_scope,
     require_hr_role,
     sanitize,
     sanitize_case_rows,
@@ -53,9 +56,11 @@ def _employee_filter(hr: HROpsService, employee_ids: set[str]) -> str:
 def dashboard(
     user: dict = Depends(get_current_user), hr: HROpsService = Depends(service)
 ):
-    roles = require_hr_role(user, "admin", "people_ops", "manager")
+    roles = require_hr_role(
+        user, "admin", "people_ops", "people_ops_payroll", "manager"
+    )
     employee_ids = hr.manager_report_ids(user) if _is_manager_scoped(roles) else None
-    return hr.dashboard(employee_ids)
+    return hr.dashboard(employee_ids, case_scope=case_domain_scope(roles))
 
 
 @router.get("/data-manager")
@@ -80,9 +85,11 @@ def data_manager(
 def insights(
     user: dict = Depends(get_current_user), hr: HROpsService = Depends(service)
 ):
-    roles = require_hr_role(user, "admin", "people_ops", "manager")
+    roles = require_hr_role(
+        user, "admin", "people_ops", "people_ops_payroll", "manager"
+    )
     employee_ids = hr.manager_report_ids(user) if _is_manager_scoped(roles) else None
-    return hr.case_metrics(employee_ids)
+    return hr.case_metrics(employee_ids, case_scope=case_domain_scope(roles))
 
 
 @router.get("/insights/operational-twin")
@@ -91,7 +98,9 @@ def operational_twin(
     user: dict = Depends(get_current_user),
     hr: HROpsService = Depends(service),
 ):
-    roles = require_hr_role(user, "admin", "people_ops", "manager")
+    roles = require_hr_role(
+        user, "admin", "people_ops", "manager"
+    )
     employee_ids = hr.manager_report_ids(user) if _is_manager_scoped(roles) else None
     return hr.operational_twin(cohort=cohort, employee_ids=employee_ids)
 
@@ -113,11 +122,18 @@ def list_cases(
         )
         return {"cases": sanitize(rows)}
 
-    roles = require_hr_role(user, "admin", "people_ops", "manager")
+    roles = require_hr_role(
+        user, "admin", "people_ops", "people_ops_payroll", "manager"
+    )
     params = {
         "select": "case_id,created_at,employee_id,case_type,priority,status,sanitized_context,assigned_to,resolved_at",
         "order": "created_at.desc",
     }
+    scope = case_domain_scope(roles)
+    if scope == "exclude_payroll":
+        params["case_type"] = "neq.payroll"
+    elif scope == "payroll_only":
+        params["case_type"] = "eq.payroll"
     if _is_manager_scoped(roles):
         report_ids = hr.manager_report_ids(user)
         rows = (
@@ -133,6 +149,35 @@ def list_cases(
     return {"cases": sanitize_case_rows(rows)}
 
 
+@router.get("/cases/{case_id}")
+def get_case(
+    case_id: str,
+    user: dict = Depends(get_current_user),
+    hr: HROpsService = Depends(service),
+):
+    roles = require_hr_role(
+        user, "admin", "people_ops", "people_ops_payroll", "manager"
+    )
+    params = {
+        "case_id": f"eq.{case_id}",
+        "select": "case_id,created_at,employee_id,case_type,priority,status,sanitized_context,assigned_to,resolved_at",
+    }
+    scope = case_domain_scope(roles)
+    if scope == "exclude_payroll":
+        params["case_type"] = "neq.payroll"
+    elif scope == "payroll_only":
+        params["case_type"] = "eq.payroll"
+    cases = hr.repo.select("workbench_cases", params)
+    if not cases:
+        raise HTTPException(status_code=404, detail="Case not found")
+    if _is_manager_scoped(roles):
+        employee_id = cases[0].get("employee_id")
+        if not employee_id:
+            raise HTTPException(status_code=404, detail="Case not found")
+        assert_manager_owns_employee(hr, user, str(employee_id))
+    return sanitize_case_rows(cases)[0]
+
+
 @router.post("/cases/{case_id}/actions")
 def act_on_case(
     case_id: str,
@@ -140,12 +185,24 @@ def act_on_case(
     user: dict = Depends(get_current_user),
     hr: HROpsService = Depends(service),
 ):
-    roles = require_hr_role(user, "admin", "people_ops", "manager")
+    roles = require_hr_role(
+        user, "admin", "people_ops", "people_ops_payroll", "manager"
+    )
     cases = hr.repo.select(
         "workbench_cases",
-        {"case_id": f"eq.{case_id}", "select": "case_id,employee_id,status"},
+        {
+            "case_id": f"eq.{case_id}",
+            "select": "case_id,employee_id,case_type,status",
+        },
     )
     if not cases:
+        raise HTTPException(status_code=404, detail="Case not found")
+    is_payroll = str(cases[0].get("case_type") or "").lower() == "payroll"
+    scope = case_domain_scope(roles)
+    if (is_payroll and not can_access_payroll_cases(roles)) or (
+        not is_payroll and scope == "payroll_only"
+    ):
+        # Hide restricted-case existence from a manager, including their report.
         raise HTTPException(status_code=404, detail="Case not found")
     if _is_manager_scoped(roles):
         employee_id = cases[0].get("employee_id")
@@ -163,6 +220,75 @@ def act_on_case(
         },
     )
     return {"case_id": case_id, "status": status_value or "recorded"}
+
+
+@router.get("/manager-actions")
+def list_manager_actions(
+    user: dict = Depends(get_current_user),
+    hr: HROpsService = Depends(service),
+):
+    roles = require_hr_role(user, "admin", "people_ops", "manager")
+    employee_ids = hr.manager_report_ids(user) if _is_manager_scoped(roles) else None
+    return {"states": hr.manager_action_states(employee_ids=employee_ids)}
+
+
+@router.get("/manager-actions/{case_id}")
+def get_manager_action(
+    case_id: str,
+    user: dict = Depends(get_current_user),
+    hr: HROpsService = Depends(service),
+):
+    roles = require_hr_role(user, "admin", "people_ops", "manager")
+    employee_ids = hr.manager_report_ids(user) if _is_manager_scoped(roles) else None
+    states = hr.manager_action_states(employee_ids=employee_ids, case_id=case_id)
+    if not states:
+        raise HTTPException(status_code=404, detail="Manager action state not found")
+    return states[0]
+
+
+@router.post("/manager-actions/{case_id}/events")
+def record_manager_action_event(
+    case_id: str,
+    request: ManagerActionEventRequest,
+    user: dict = Depends(get_current_user),
+    hr: HROpsService = Depends(service),
+):
+    roles = require_hr_role(user, "admin", "people_ops", "manager")
+    if _is_manager_scoped(roles):
+        states = hr.manager_action_states(case_id=case_id)
+        if not states:
+            raise HTTPException(status_code=404, detail="Manager action state not found")
+        assert_manager_owns_employee(hr, user, str(states[0]["employee_id"]))
+        if request.event_type != "acknowledged":
+            raise HTTPException(
+                status_code=403,
+                detail="Managers may only acknowledge an assigned action",
+            )
+    state = hr.repo.rpc(
+        "record_manager_action_event",
+        {
+            "target_case_id": case_id,
+            "new_source_event_id": request.source_event_id,
+            "new_event_type": request.event_type,
+            "event_occurred_at": request.occurred_at.isoformat(),
+            "new_next_reminder_at": (
+                request.next_reminder_at.isoformat()
+                if request.next_reminder_at
+                else None
+            ),
+            "new_acknowledgment_deadline": (
+                request.acknowledgment_deadline.isoformat()
+                if request.acknowledgment_deadline
+                else None
+            ),
+            "new_action_deadline": (
+                request.action_deadline.isoformat()
+                if request.action_deadline
+                else None
+            ),
+        },
+    )
+    return state
 
 
 @router.post("/confidential-cases/{case_id}/actions")
@@ -205,6 +331,28 @@ def list_policies(
         },
     )
     return {"policies": sanitize(rows)}
+
+
+@router.get("/policies/{version_id}")
+def get_policy(
+    version_id: str,
+    user: dict = Depends(get_current_user),
+    hr: HROpsService = Depends(service),
+):
+    """Return the complete governed snapshot so Policy Studio can clone it."""
+    require_hr_role(user, "admin", "people_ops", "people_ops_confidential")
+    rows = hr.repo.select(
+        "policy_versions",
+        {
+            "version_id": f"eq.{version_id}",
+            "select": "version_id,status,created_at,created_by,change_summary,snapshot_hash,activated_at,parent_version_id,config_snapshot",
+        },
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Policy version not found")
+    # The snapshot is returned without lossy key filtering. Policy writes pass
+    # the strict policy validator and this endpoint is restricted to governors.
+    return rows[0]
 
 
 @router.post("/policies")

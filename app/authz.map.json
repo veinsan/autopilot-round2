@@ -46,7 +46,7 @@
   },
   "/api/hr.*": {
     "description": "HR Command Center; endpoint applies role and relationship checks",
-    "ANY": ["admin", "people_ops", "people_ops_confidential", "manager"]
+    "ANY": ["admin", "people_ops", "people_ops_payroll", "people_ops_confidential", "manager"]
   },
 
   "/api/documents/{document_id}": {

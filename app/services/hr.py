@@ -31,6 +31,27 @@ KNOWN_REASON_CODES = {
     "PAYROLL_RECORD_MISSING", "DAY_ONE_DEPENDENCY_BLOCKED", "LEARNING_MILESTONE_OVERDUE",
     "MANAGER_ACKNOWLEDGMENT_OVERDUE", "MANAGER_ACTION_OVERDUE", "COHORT_DEPENDENCY_BOTTLENECK",
 }
+REQUIRED_POLICY_THRESHOLD_KEYS = {
+    "work_auth_expiry_at_risk_days",
+    "compliance_at_risk_days",
+    "first_payroll_cutoff_days",
+    "nudge_cadence_days",
+    "manager_acknowledgment_deadline_days",
+    "manager_action_deadline_days",
+    "manager_max_reminders",
+    "bottleneck_min_workers",
+    "bottleneck_min_percent",
+    "minimum_cohort_size",
+}
+JURISDICTION_THRESHOLD_KEYS = {
+    "work_auth_expiry_at_risk_days",
+    "compliance_at_risk_days",
+    "first_payroll_cutoff_days",
+    "nudge_cadence_days",
+    "manager_acknowledgment_deadline_days",
+    "manager_action_deadline_days",
+    "manager_max_reminders",
+}
 
 
 def user_roles(user: dict | None) -> set[str]:
@@ -111,6 +132,32 @@ CASE_ACTION_LABELS = {
     "onboarding": "Review the outstanding onboarding milestone",
     "system_exception": "Review the operational exception",
 }
+PAYROLL_CASE_TYPE = "payroll"
+MANAGER_ACTION_STATE_FIELDS = (
+    "case_id,employee_id,current_state,nudge_created_at,delivered_at,"
+    "acknowledged_at,action_verified_at,escalated_at,"
+    "successful_reminder_count,next_reminder_at,acknowledgment_deadline,"
+    "action_deadline,source_event_id,updated_at"
+)
+
+
+def can_access_payroll_cases(roles: set[str]) -> bool:
+    """Payroll access is isolated from manager and general People Ops roles."""
+    return "admin" in roles or (
+        "people_ops_payroll" in roles
+        and not roles.intersection({"manager", "people_ops"})
+    )
+
+
+def case_domain_scope(roles: set[str]) -> str:
+    """Return the server-enforced standard-case domain scope for a role set."""
+    if "admin" in roles:
+        return "all"
+    if "people_ops_payroll" in roles and not roles.intersection(
+        {"manager", "people_ops"}
+    ):
+        return "payroll_only"
+    return "exclude_payroll"
 
 
 def sanitize_case_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -310,10 +357,22 @@ class PolicyEvaluator:
         if not isinstance(reason_codes, list):
             errors.append("reason_codes must be a list")
             unknown: set[str] = set()
+            missing_codes: set[str] = set()
+        elif not all(isinstance(code, str) for code in reason_codes):
+            errors.append("reason_codes must contain only strings")
+            unknown = set()
+            missing_codes = KNOWN_REASON_CODES
         else:
             unknown = set(reason_codes) - KNOWN_REASON_CODES
+            missing_codes = KNOWN_REASON_CODES - set(reason_codes)
+            if len(reason_codes) != len(set(reason_codes)):
+                errors.append("reason_codes must not contain duplicates")
         if unknown:
             errors.append(f"Unknown reason codes: {', '.join(sorted(unknown))}")
+        if missing_codes:
+            errors.append(
+                f"Missing registered reason codes: {', '.join(sorted(missing_codes))}"
+            )
         routing = snapshot.get("routing", {})
         if isinstance(routing, dict) and any("manager" in str(value).lower() and "confidential" in str(key).lower() for key, value in routing.items()):
             errors.append("Confidential routing cannot target a manager")
@@ -321,8 +380,14 @@ class PolicyEvaluator:
         if thresholds is not None and not isinstance(thresholds, dict):
             errors.append("thresholds must be an object")
         elif isinstance(thresholds, dict):
+            missing_thresholds = REQUIRED_POLICY_THRESHOLD_KEYS - set(thresholds)
+            if missing_thresholds:
+                errors.append(
+                    "Missing required thresholds: "
+                    + ", ".join(sorted(missing_thresholds))
+                )
             for key, value in thresholds.items():
-                if key.endswith(("_days", "_score", "_threshold", "_workers", "_percent", "_size")):
+                if key.endswith(("_days", "_score", "_threshold", "_workers", "_percent", "_size", "_reminders")):
                     if isinstance(value, bool) or not isinstance(value, (int, float, dict)):
                         errors.append(
                             f"Threshold {key} must be numeric or jurisdiction-mapped"
@@ -338,6 +403,37 @@ class PolicyEvaluator:
                         )
                     elif isinstance(value, (int, float)) and value < 0:
                         errors.append(f"Threshold {key} must be non-negative")
+                if (
+                    key in JURISDICTION_THRESHOLD_KEYS
+                    and isinstance(value, dict)
+                    and "default" not in value
+                ):
+                    errors.append(
+                        f"Threshold {key} jurisdiction mapping requires a default"
+                    )
+        if not isinstance(snapshot.get("demo_mode"), bool):
+            errors.append("demo_mode must be a boolean")
+        for retry_key in ("retry", "retry_demo_profile"):
+            retry = snapshot.get(retry_key)
+            if not isinstance(retry, dict):
+                errors.append(f"{retry_key} must be an object")
+                continue
+            attempts = retry.get("max_attempts")
+            backoff = retry.get("backoff_seconds")
+            if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+                errors.append(f"{retry_key}.max_attempts must be a positive integer")
+            if (
+                not isinstance(backoff, list)
+                or any(
+                    isinstance(delay, bool)
+                    or not isinstance(delay, (int, float))
+                    or delay < 0
+                    for delay in backoff
+                )
+            ):
+                errors.append(
+                    f"{retry_key}.backoff_seconds must contain non-negative numbers"
+                )
         return errors
 
     @staticmethod
@@ -542,8 +638,17 @@ class HROpsService:
             return bool(candidate)
         return candidate != self.confidential_routing(active["config_snapshot"])
 
-    def case_metrics(self, employee_ids: set[str] | None = None) -> dict[str, Any]:
+    def case_metrics(
+        self,
+        employee_ids: set[str] | None = None,
+        *,
+        case_scope: str = "all",
+    ) -> dict[str, Any]:
         params = {"select": "case_type,status,employee_id"}
+        if case_scope == "exclude_payroll":
+            params["case_type"] = f"neq.{PAYROLL_CASE_TYPE}"
+        elif case_scope == "payroll_only":
+            params["case_type"] = f"eq.{PAYROLL_CASE_TYPE}"
         if employee_ids is not None:
             if not employee_ids:
                 cases: list[dict[str, Any]] = []
@@ -576,6 +681,24 @@ class HROpsService:
             "numerator": len(open_cases),
             "denominator": len(cases),
         }
+
+    def manager_action_states(
+        self,
+        *,
+        employee_ids: set[str] | None = None,
+        case_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params = {
+            "select": MANAGER_ACTION_STATE_FIELDS,
+            "order": "updated_at.desc",
+        }
+        if case_id:
+            params["case_id"] = f"eq.{case_id}"
+        if employee_ids is not None:
+            if not employee_ids:
+                return []
+            params["employee_id"] = self._in_filter(employee_ids)
+        return self.repo.select_all("manager_action_states", params)
 
     def finding_counts(
         self,
@@ -791,9 +914,18 @@ class HROpsService:
             "bottlenecks": bottlenecks,
         }
 
-    def dashboard(self, employee_ids: set[str] | None = None) -> dict[str, Any]:
+    def dashboard(
+        self,
+        employee_ids: set[str] | None = None,
+        *,
+        case_scope: str = "all",
+    ) -> dict[str, Any]:
         worker_params = {"select": "Employee_ID,cohort"}
         case_params = {"select": "case_id,status,priority,case_type"}
+        if case_scope == "exclude_payroll":
+            case_params["case_type"] = f"neq.{PAYROLL_CASE_TYPE}"
+        elif case_scope == "payroll_only":
+            case_params["case_type"] = f"eq.{PAYROLL_CASE_TYPE}"
         if employee_ids is not None:
             if not employee_ids:
                 workers: list[dict[str, Any]] = []

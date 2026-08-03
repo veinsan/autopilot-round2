@@ -6,20 +6,33 @@ on Supabase, Keycloak, or Auto being reachable.
 
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.schemas.hr import RunRequest
+from app.routers.hr import (
+    act_on_case,
+    dashboard as dashboard_endpoint,
+    get_case,
+    get_policy,
+    insights as insights_endpoint,
+    list_cases,
+    record_manager_action_event,
+)
+from app.schemas.hr import CaseActionRequest, ManagerActionEventRequest, RunRequest
 from app.services.auto import AutoWorkflowClient
 from app.services.hr import (
     HROpsService,
     KNOWN_REASON_CODES,
     PolicyEvaluator,
     assert_manager_owns_employee,
+    can_access_payroll_cases,
+    case_domain_scope,
     require_hr_role,
     sanitize,
     sanitize_case_rows,
@@ -29,6 +42,11 @@ from app.services.hr import (
 )
 
 
+def round2_policy() -> dict[str, Any]:
+    path = Path(__file__).resolve().parents[1] / "config" / "policy_config.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 class FakeRepository:
     """Small query-aware fake matching the repository methods used here."""
 
@@ -36,6 +54,7 @@ class FakeRepository:
         self.tables = tables or {}
         self.inserts: list[tuple[str, dict[str, Any]]] = []
         self.patches: list[tuple[str, dict[str, str], dict[str, Any]]] = []
+        self.rpc_calls: list[tuple[str, dict[str, Any]]] = []
 
     def select(
         self, table: str, params: dict[str, str] | None = None
@@ -57,6 +76,13 @@ class FakeRepository:
                     for value in expression[4:-1].split(",")
                 }
                 rows = [row for row in rows if str(row.get(key)) in expected]
+            elif expression.startswith("neq."):
+                expected = expression[4:]
+                rows = [
+                    row
+                    for row in rows
+                    if str(row.get(key)).lower() != expected.lower()
+                ]
         return rows
 
     def select_all(
@@ -96,6 +122,16 @@ class FakeRepository:
             if row.get("Employee_ID")
         }
 
+    def rpc(self, function: str, payload: dict[str, Any]) -> Any:
+        self.rpc_calls.append((function, dict(payload)))
+        if function == "record_manager_action_event":
+            return {
+                "case_id": payload["target_case_id"],
+                "current_state": payload["new_event_type"],
+                "source_event_id": payload["new_source_event_id"],
+            }
+        return "recorded"
+
 
 def test_run_request_requires_exactly_one_matching_scope_target() -> None:
     employee = RunRequest(scope="employee", employee_id="EMP-1")
@@ -112,10 +148,7 @@ def test_run_request_requires_exactly_one_matching_scope_target() -> None:
 
 
 def test_policy_validator_accepts_registered_reason_codes() -> None:
-    snapshot = {
-        "reason_codes": sorted(KNOWN_REASON_CODES),
-        "routing": {"payroll": "people_ops"},
-    }
+    snapshot = round2_policy()
 
     assert PolicyEvaluator().validate(snapshot) == []
 
@@ -128,19 +161,57 @@ def test_policy_validator_requires_non_empty_object(snapshot: Any) -> None:
 
 
 def test_policy_validator_reports_unknown_codes_in_stable_order() -> None:
-    errors = PolicyEvaluator().validate(
-        {"reason_codes": ["UNKNOWN_Z", "UNKNOWN_A"], "routing": {}}
-    )
+    snapshot = round2_policy()
+    snapshot["reason_codes"].extend(["UNKNOWN_Z", "UNKNOWN_A"])
+    errors = PolicyEvaluator().validate(snapshot)
 
     assert errors == ["Unknown reason codes: UNKNOWN_A, UNKNOWN_Z"]
 
 
 def test_policy_validator_rejects_confidential_manager_routing() -> None:
-    errors = PolicyEvaluator().validate(
-        {"reason_codes": [], "routing": {"confidential_disclosure": "manager"}}
-    )
+    snapshot = round2_policy()
+    snapshot["routing"]["confidential_disclosure"] = "manager"
+    errors = PolicyEvaluator().validate(snapshot)
 
     assert errors == ["Confidential routing cannot target a manager"]
+
+
+def test_policy_validator_requires_every_round2_threshold() -> None:
+    snapshot = round2_policy()
+    del snapshot["thresholds"]["first_payroll_cutoff_days"]
+
+    assert PolicyEvaluator().validate(snapshot) == [
+        "Missing required thresholds: first_payroll_cutoff_days"
+    ]
+
+
+def test_policy_validator_rejects_non_string_reason_codes_without_crashing() -> None:
+    snapshot = round2_policy()
+    snapshot["reason_codes"] = [{"code": "WORK_AUTH_EXPIRED"}]
+
+    errors = PolicyEvaluator().validate(snapshot)
+
+    assert "reason_codes must contain only strings" in errors
+    assert any(error.startswith("Missing registered reason codes:") for error in errors)
+
+
+def test_policy_validator_requires_explicit_jurisdiction_default() -> None:
+    snapshot = round2_policy()
+    snapshot["thresholds"]["compliance_at_risk_days"] = {"SG": 10}
+
+    assert PolicyEvaluator().validate(snapshot) == [
+        "Threshold compliance_at_risk_days jurisdiction mapping requires a default"
+    ]
+
+
+def test_policy_validator_rejects_unsafe_retry_profiles() -> None:
+    snapshot = round2_policy()
+    snapshot["retry"] = {"max_attempts": 0, "backoff_seconds": [5, -1]}
+
+    assert PolicyEvaluator().validate(snapshot) == [
+        "retry.max_attempts must be a positive integer",
+        "retry.backoff_seconds must contain non-negative numbers",
+    ]
 
 
 def test_confidential_approval_is_required_only_when_restricted_route_changes() -> None:
@@ -794,3 +865,194 @@ def test_source_event_id_is_stable_and_excludes_private_payload() -> None:
     )
 
     assert first == second
+
+
+def _gated_case_repository() -> FakeRepository:
+    return FakeRepository(
+        {
+            "identity_profiles": [
+                {"auth_subject": "manager-1", "manager_wid": "MGR-1"}
+            ],
+            "Workers": [
+                {"Employee_ID": "EMP-1", "Manager_WID": "MGR-1", "cohort": "C-1"}
+            ],
+            "workbench_cases": [
+                {
+                    "case_id": "CASE-STANDARD",
+                    "employee_id": "EMP-1",
+                    "case_type": "day_one_readiness",
+                    "priority": "high",
+                    "status": "open",
+                    "sanitized_context": {"reason_code": "DAY_ONE_DEPENDENCY_BLOCKED"},
+                },
+                {
+                    "case_id": "CASE-PAYROLL",
+                    "employee_id": "EMP-1",
+                    "case_type": "payroll",
+                    "priority": "critical",
+                    "status": "open",
+                    "sanitized_context": {
+                        "reason_code": "PAYROLL_ERROR_DETECTED",
+                        "error_reason": "PAYROLL_SECRET_XYZ",
+                        "gross": 999999,
+                        "net": 888888,
+                    },
+                },
+            ],
+            "integration_health": [],
+            "policy_versions": [],
+        }
+    )
+
+
+def test_payroll_capability_is_dedicated_and_manager_role_takes_precedence() -> None:
+    assert can_access_payroll_cases({"admin"}) is True
+    assert can_access_payroll_cases({"people_ops_payroll"}) is True
+    assert can_access_payroll_cases({"people_ops"}) is False
+    assert can_access_payroll_cases({"people_ops", "people_ops_payroll"}) is False
+    assert can_access_payroll_cases({"manager", "people_ops_payroll"}) is False
+    assert case_domain_scope({"people_ops_payroll"}) == "payroll_only"
+    assert case_domain_scope({"manager", "people_ops_payroll"}) == "exclude_payroll"
+
+
+def test_manager_list_detail_action_dashboard_and_insights_exclude_payroll() -> None:
+    repo = _gated_case_repository()
+    hr = HROpsService(repo)  # type: ignore[arg-type]
+    manager = {
+        "sub": "manager-1",
+        "realm_access": {"roles": ["manager", "people_ops_payroll"]},
+    }
+
+    listed = list_cases(confidential=False, user=manager, hr=hr)
+    assert [row["case_id"] for row in listed["cases"]] == ["CASE-STANDARD"]
+    with pytest.raises(HTTPException) as detail_error:
+        get_case("CASE-PAYROLL", user=manager, hr=hr)
+    assert detail_error.value.status_code == 404
+    with pytest.raises(HTTPException) as action_error:
+        act_on_case(
+            "CASE-PAYROLL",
+            CaseActionRequest(decision="claim"),
+            user=manager,
+            hr=hr,
+        )
+    assert action_error.value.status_code == 404
+    assert repo.rpc_calls == []
+
+    dashboard_result = dashboard_endpoint(user=manager, hr=hr)
+    insight_result = insights_endpoint(user=manager, hr=hr)
+    assert dashboard_result["open_cases"] == 1
+    assert dashboard_result["critical_cases"] == 0
+    assert insight_result["open_case_count"] == 1
+    assert "payroll" not in insight_result["open_cases_by_type"]
+    assert "PAYROLL_SECRET_XYZ" not in str(listed)
+
+
+def test_dedicated_payroll_reviewer_gets_only_safe_payroll_metadata() -> None:
+    repo = _gated_case_repository()
+    hr = HROpsService(repo)  # type: ignore[arg-type]
+    reviewer = {
+        "sub": "payroll-1",
+        "realm_access": {"roles": ["people_ops_payroll"]},
+    }
+
+    listed = list_cases(confidential=False, user=reviewer, hr=hr)
+    assert [row["case_id"] for row in listed["cases"]] == ["CASE-PAYROLL"]
+    assert listed["cases"][0]["sanitized_context"] == {
+        "reason_code": "PAYROLL_ERROR_DETECTED"
+    }
+    assert "PAYROLL_SECRET_XYZ" not in str(listed)
+    assert "999999" not in str(listed)
+    assert "888888" not in str(listed)
+
+    dashboard_result = dashboard_endpoint(user=reviewer, hr=hr)
+    insight_result = insights_endpoint(user=reviewer, hr=hr)
+    assert dashboard_result["open_cases"] == 1
+    assert dashboard_result["critical_cases"] == 1
+    assert insight_result["open_cases_by_type"] == {"payroll": 1}
+
+
+def test_manager_action_event_contract_requires_chronological_creation_deadlines() -> None:
+    occurred_at = datetime(2026, 8, 3, 9, tzinfo=UTC)
+    valid = ManagerActionEventRequest(
+        source_event_id="slack-delivery-1",
+        event_type="nudge_created",
+        occurred_at=occurred_at,
+        next_reminder_at=occurred_at + timedelta(days=1),
+        acknowledgment_deadline=occurred_at + timedelta(days=2),
+        action_deadline=occurred_at + timedelta(days=5),
+    )
+    assert valid.event_type == "nudge_created"
+
+    with pytest.raises(ValidationError):
+        ManagerActionEventRequest(
+            source_event_id="slack-delivery-2",
+            event_type="nudge_created",
+            occurred_at=occurred_at,
+            next_reminder_at=occurred_at + timedelta(days=3),
+            acknowledgment_deadline=occurred_at + timedelta(days=2),
+            action_deadline=occurred_at + timedelta(days=5),
+        )
+
+
+def test_manager_can_only_submit_acknowledgment_for_owned_action_state() -> None:
+    repo = _gated_case_repository()
+    repo.tables["manager_action_states"] = [
+        {
+            "case_id": "CASE-STANDARD",
+            "employee_id": "EMP-1",
+            "current_state": "delivered",
+            "source_event_id": "delivery-1",
+        }
+    ]
+    hr = HROpsService(repo)  # type: ignore[arg-type]
+    manager = {"sub": "manager-1", "realm_access": {"roles": ["manager"]}}
+    occurred_at = datetime(2026, 8, 3, 9, tzinfo=UTC)
+
+    result = record_manager_action_event(
+        "CASE-STANDARD",
+        ManagerActionEventRequest(
+            source_event_id="ack-1",
+            event_type="acknowledged",
+            occurred_at=occurred_at,
+        ),
+        user=manager,
+        hr=hr,
+    )
+    assert result["source_event_id"] == "ack-1"
+    with pytest.raises(HTTPException) as forbidden:
+        record_manager_action_event(
+            "CASE-STANDARD",
+            ManagerActionEventRequest(
+                source_event_id="delivery-2",
+                event_type="delivery_succeeded",
+                occurred_at=occurred_at,
+            ),
+            user=manager,
+            hr=hr,
+        )
+    assert forbidden.value.status_code == 403
+
+
+def test_policy_detail_returns_complete_snapshot_for_authorized_clone() -> None:
+    snapshot = {
+        "reason_codes": sorted(KNOWN_REASON_CODES),
+        "thresholds": {"manager_max_reminders": {"default": 2}},
+        "notification_templates": {"manager_nudge": "Template {{case_id}}"},
+    }
+    repo = FakeRepository(
+        {
+            "policy_versions": [
+                {
+                    "version_id": "policy-active",
+                    "status": "active",
+                    "config_snapshot": snapshot,
+                }
+            ]
+        }
+    )
+    result = get_policy(
+        "policy-active",
+        user={"sub": "ops-1", "realm_access": {"roles": ["people_ops"]}},
+        hr=HROpsService(repo),  # type: ignore[arg-type]
+    )
+    assert result["config_snapshot"] == snapshot

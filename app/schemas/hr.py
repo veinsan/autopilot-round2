@@ -30,6 +30,51 @@ class CaseActionRequest(StrictModel):
     ] | None = None
 
 
+class ManagerActionEventRequest(StrictModel):
+    """Idempotent event applied to the server-owned manager action state."""
+
+    source_event_id: str = Field(min_length=1, max_length=200)
+    event_type: Literal[
+        "nudge_created",
+        "delivery_succeeded",
+        "delivery_failed",
+        "acknowledged",
+        "action_verified",
+        "escalated",
+    ]
+    occurred_at: datetime
+    next_reminder_at: datetime | None = None
+    acknowledgment_deadline: datetime | None = None
+    action_deadline: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_deadlines(self):
+        timestamps = (
+            self.occurred_at,
+            self.next_reminder_at,
+            self.acknowledgment_deadline,
+            self.action_deadline,
+        )
+        if any(value is not None and value.utcoffset() is None for value in timestamps):
+            raise ValueError("manager action timestamps must include a timezone")
+        if self.event_type == "nudge_created":
+            if not all(
+                (
+                    self.next_reminder_at,
+                    self.acknowledgment_deadline,
+                    self.action_deadline,
+                )
+            ):
+                raise ValueError("nudge_created requires all manager action deadlines")
+            if not (
+                self.occurred_at <= self.next_reminder_at
+                <= self.acknowledgment_deadline
+                <= self.action_deadline
+            ):
+                raise ValueError("manager action deadlines must be chronological")
+        return self
+
+
 class PolicyDraftRequest(StrictModel):
     config_snapshot: dict[str, Any]
     change_summary: str = Field(min_length=3, max_length=1000)

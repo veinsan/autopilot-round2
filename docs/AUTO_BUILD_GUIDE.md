@@ -901,9 +901,10 @@ is not evidence.
 
 | ID | Workflow | Build step | Person A | Person B | Dependency | Build | Tests | Evidence / notes |
 |---|---|---|---|---|---|---|---|---|
-| G-01 | Policy Studio | Activate complete Round 2 policy | Review/activate | Validate contract | None | Not started | Not started | |
-| G-02 | Command Center | Restrict payroll case RBAC | Supply live route test | Implement RBAC | Backend | Not started | Not started | Blocks 6.3 |
-| G-03 | Command Center | Publish manager action-state contract | Supply Auto needs | Implement contract | Backend | Not started | Not started | Blocks 7.3 |
+| G-01 | Policy Studio | Activate complete Round 2 policy | Review/activate | Validate contract | None | Draft live | Passed (69 focused) | `policy_round2_v1` matches canonical v2; human simulation, approval, and activation remain |
+| G-02 | Command Center | Restrict payroll case RBAC | Supply live route test | Implement RBAC | Backend | Done (code) | Passed (60 focused; 137 full) | Dedicated `people_ops_payroll`; deploy and provision the role before 6.3 |
+| G-03 | Command Center | Publish manager action-state contract | Supply Auto needs | Implement contract | Backend | Done (code) | Passed (unit + clean-install SQL smoke) | Apply `config/supabase_schema.sql` to live Supabase before 7.3 |
+| UI | Command Center | Policy Studio, Workbench, Dashboard, Data Manager | Build/live-test | Publish APIs | G-01/G-02/G-03 contracts | Done (code) | Production build passed | All user-facing copy is English; live gates remain as above |
 | 5.1 | OP-05 | Context/policy/timezone | Build | Fixture support | G-01 | Not started | Not started | |
 | 5.2 | OP-05 | Compliance/work-auth rules + logs | Build/test | Verify persisted log | 5.1 | Not started | Not started | |
 | 5.3 | OP-05 | Partial failure behavior | Build/test | Verify safe API result | 5.2 | Not started | Not started | |

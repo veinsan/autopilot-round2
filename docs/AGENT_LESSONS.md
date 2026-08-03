@@ -51,3 +51,43 @@ credentials or confidential payloads.
   use a temporary PDF library outside the repository and keep the repo clean.
 - Force UTF-8 stdout before printing extracted PDF text on Windows; the default
   code page can fail on punctuation such as non-breaking hyphens.
+- A `400` from Auto's workflow-run listing is not proof that the API key,
+  organization, or workflow UUID is invalid. Treat it as an endpoint/parameter
+  contract mismatch until a documented read-only control request distinguishes
+  those causes; never print the upstream response body because it may contain
+  operational context.
+- On Windows, even `repr()` output can contain Unicode that fails under the
+  active console code page. For source inspections, print
+  `text.encode("unicode_escape").decode("ascii")` instead of relying on repr or
+  changing the file to accommodate the terminal.
+- Do not assume the repository's `scripts/` directory imports as the intended
+  namespace in an ad-hoc host Python process; another `scripts` package can win
+  resolution. Import a script by its explicit file path or keep a tiny
+  verification helper self-contained, while pytest may continue using its
+  configured repository import path.
+- When a zero-match `rg` result is the desired validation outcome, handle exit
+  code 1 explicitly instead of chaining it as an ordinary success command; this
+  keeps a clean privacy/language scan from being reported as a failed check.
+- Do not place a role-specific companion endpoint in an unconditional frontend
+  `Promise.all`; one expected 403 then hides data the same user may legitimately
+  read. Gate optional requests with the exact backend capability contract and
+  use an empty safe projection when the role lacks it.
+- Keep mixed-role behavior identical in list, detail, action, and UI capability
+  checks. A dedicated payroll role must not accidentally elevate a Manager or a
+  general People Ops session through a looser action-path helper.
+- PostgreSQL `CREATE DATABASE` cannot share a transactional `psql -c` batch with
+  role or schema statements. Run the exact temporary-database creation as its
+  own command, then create helper roles while connected to an existing database.
+- When reconstructing an EAV policy snapshot, handle reserved categories before
+  testing whether the category name already exists as a top-level key. Otherwise
+  the first `retry` row creates that key and later retry-profile rows can be
+  silently nested under it. Always round-trip the canonical JSON in a test.
+### API error details are not always strings
+
+- Mistake: the frontend API client passed FastAPI's structured `detail` object directly to `new Error()`, causing policy validation failures to appear as `[object Object]`.
+- Prevention: normalize string, validation-list, and structured error details into a safe readable message at the shared API-client boundary.
+
+### Allow enough time for Docker frontend builds
+
+- Mistake: `docker compose up -d --build frontend` was given a 120-second tool timeout even though this repository's clean Next.js image build can take longer.
+- Prevention: build the frontend image separately with a longer bounded timeout, then restart only the already-built frontend service.

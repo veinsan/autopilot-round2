@@ -3,6 +3,48 @@ import { getSession } from 'next-auth/react'
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || ''
 
+function formatValidationItem(item: unknown): string | null {
+  if (typeof item === 'string') return item
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+
+  const entry = item as Record<string, unknown>
+  const message = typeof entry.msg === 'string' ? entry.msg : null
+  if (!message) return null
+
+  const location = Array.isArray(entry.loc)
+    ? entry.loc.filter((part) => typeof part === 'string' || typeof part === 'number').join('.')
+    : ''
+  return location ? `${location}: ${message}` : message
+}
+
+export function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string' && detail.trim()) return detail
+
+  if (Array.isArray(detail)) {
+    const messages = detail.map(formatValidationItem).filter(Boolean)
+    if (messages.length > 0) return messages.join('; ')
+  }
+
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const objectDetail = detail as Record<string, unknown>
+    const validationErrors = objectDetail.validation_errors
+    if (Array.isArray(validationErrors)) {
+      const messages = validationErrors
+        .map(formatValidationItem)
+        .filter(Boolean)
+      if (messages.length > 0) {
+        return `Policy validation failed: ${messages.join('; ')}`
+      }
+    }
+
+    if (typeof objectDetail.message === 'string' && objectDetail.message.trim()) {
+      return objectDetail.message
+    }
+  }
+
+  return 'An API error occurred.'
+}
+
 /**
  * A robust API client that handles authentication and base path resolution.
  * @param endpoint The API endpoint to call, e.g., '/api/test' or '/api/admin/dashboard'.
@@ -32,7 +74,7 @@ async function apiClientFetch<T = unknown>(endpoint: string, options: RequestIni
     const errorData = await response.json().catch(() => ({
       detail: response.statusText,
     }))
-    throw new Error(errorData.detail || 'An API error occurred.')
+    throw new Error(formatApiErrorDetail(errorData.detail))
   }
 
   // Handle responses with no content

@@ -1,7 +1,27 @@
 {
-  "version": "1.0",
+  "version": "2.0",
   "as_of_date": null,
   "demo_mode": false,
+  "reason_codes": [
+    "MISSING_DAY_ONE_ACCESS",
+    "STALLED_COMPLIANCE_DOC",
+    "TASK_ALREADY_ESCALATED",
+    "PROVISIONING_DELAYED",
+    "LOW_ENGAGEMENT_SCORE",
+    "SENSITIVE_DISCLOSURE_DETECTED",
+    "COMPLIANCE_DEADLINE_AT_RISK",
+    "COMPLIANCE_LEGAL_BREACH",
+    "WORK_AUTH_EXPIRY_AT_RISK",
+    "WORK_AUTH_EXPIRED",
+    "PAYROLL_ERROR_DETECTED",
+    "PAYROLL_NOT_CONFIRMED",
+    "PAYROLL_RECORD_MISSING",
+    "DAY_ONE_DEPENDENCY_BLOCKED",
+    "LEARNING_MILESTONE_OVERDUE",
+    "MANAGER_ACKNOWLEDGMENT_OVERDUE",
+    "MANAGER_ACTION_OVERDUE",
+    "COHORT_DEPENDENCY_BOTTLENECK"
+  ],
   "thresholds": {
     "provisioning_blocked_grace_days": 1,
     "task_stalled_overdue_days": 3,
@@ -14,7 +34,17 @@
     "dedup_confidence_threshold": 0.9,
     "dedup_flag_band_low": 0.7,
     "dedup_hire_date_proximity_days": 3,
-    "catch_rate_sla_days": 3
+    "catch_rate_sla_days": 3,
+    "work_auth_expiry_at_risk_days": {"default": 30},
+    "compliance_at_risk_days": {"default": 14},
+    "first_payroll_cutoff_days": {"default": 30},
+    "nudge_cadence_days": {"default": 2},
+    "manager_acknowledgment_deadline_days": {"default": 2},
+    "manager_action_deadline_days": {"default": 5},
+    "manager_max_reminders": {"default": 2},
+    "bottleneck_min_workers": 2,
+    "bottleneck_min_percent": 25,
+    "minimum_cohort_size": 3
   },
   "normalization": {
     "date_formats_accepted": [

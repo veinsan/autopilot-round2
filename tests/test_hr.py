@@ -11,7 +11,7 @@ def test_policy_validator_rejects_unknown_reason_code():
 
 def test_policy_validator_blocks_confidential_manager_route():
     errors = PolicyEvaluator().validate({"reason_codes": [], "routing": {"confidential_case": "manager"}})
-    assert errors == ["Confidential routing cannot target a manager"]
+    assert "Confidential routing cannot target a manager" in errors
 
 
 def test_work_authorization_findings_are_deterministic():

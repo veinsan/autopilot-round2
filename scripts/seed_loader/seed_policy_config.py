@@ -14,7 +14,10 @@ import os
 import sys
 from pathlib import Path
 
-from supabase_client import SupabaseClient, SupabaseError
+try:
+    from .supabase_client import SupabaseClient, SupabaseError
+except ImportError:  # Direct script execution from scripts/seed_loader.
+    from supabase_client import SupabaseClient, SupabaseError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 POLICY_CONFIG_PATH = REPO_ROOT / "config" / "policy_config.json"
@@ -25,6 +28,7 @@ JUSTIFICATIONS = {
     "version": "Versioned so any change can be diffed and audited (ARCHITECTURE.md §9).",
     "as_of_date": "null = live wall-clock now (production). Pinned only for tests/demo recording, never an implicit now() inside Operator logic (ADR-014).",
     "demo_mode": "When true, write-side Operators read retry_demo_profile instead of retry, eliminating up to 85s of backoff dead air during a live take (RISKS.md R-23).",
+    "reason_codes": "The complete engineering-reviewed Round 1 and Round 2 routing registry. Operators must never invent or route an unregistered code.",
     "provisioning_blocked_grace_days": "Day-one access should exist by end of Day 1; 1 day grace absorbs timezone/EOD ambiguity. Owner: OP-02.",
     "task_stalled_overdue_days": "3 days past due is late enough to be a real signal, short enough to still be actionable. Owner: OP-02.",
     "compliance_step_terms": "Explicit list, not substring match, so the rule survives a hidden dataset that renames/adds compliance steps (ADR-016). Owner: OP-02.",
@@ -34,6 +38,16 @@ JUSTIFICATIONS = {
     "dedup_flag_band_low": "Below this, confidently a new hire, no escalation. Between the two bands -> escalate for human confirmation. Owner: OP-01.",
     "dedup_hire_date_proximity_days": "Tight window catching an accidental re-submission of the same intake event, not 'hired in the same cohort'. Empirically validated: EMP7032/EMP7059 and EMP7038/EMP7043 share a name 17-18 days apart in the public sample - a 30-day default would have false-merged both. Owner: OP-01.",
     "catch_rate_sla_days": "Matches task_stalled_overdue_days, keeping the 'did we act in time' bar consistent with the 'is this task late' bar. Owner: OP-05.",
+    "work_auth_expiry_at_risk_days": "Editable jurisdiction-aware warning window for work authorization expiry. Owner: OP-05.",
+    "compliance_at_risk_days": "Editable jurisdiction-aware warning window for incomplete compliance items. Owner: OP-05.",
+    "first_payroll_cutoff_days": "Editable jurisdiction-aware first-payroll verification cutoff. Owner: OP-06.",
+    "nudge_cadence_days": "Minimum policy cadence between successful manager reminders. Owner: OP-07.",
+    "manager_acknowledgment_deadline_days": "Deadline after confirmed delivery for explicit manager acknowledgment. Owner: OP-07.",
+    "manager_action_deadline_days": "Deadline after acknowledgment for a verified manager action. Owner: OP-07.",
+    "manager_max_reminders": "Maximum successful manager reminders before governed escalation. Failed deliveries do not consume this limit. Owner: OP-07.",
+    "bottleneck_min_workers": "Minimum distinct affected employees before a cohort dependency bottleneck can be surfaced. Owner: OP-07.",
+    "bottleneck_min_percent": "Minimum affected-cohort percentage, used together with bottleneck_min_workers. Owner: OP-07.",
+    "minimum_cohort_size": "Privacy floor below which sensitive cohort breakdowns are suppressed.",
     "date_formats_accepted": "13 strptime patterns covering the 3 formats in the public sample plus unseen formats (ADR-011). Never guess a date.",
     "ambiguous_numeric_date_order": "DMY - CONTEXT.md §12.4 documents the sample's slash format as DD/MM/YYYY. A value invalid under this order but valid under MDY escalates as AMBIGUOUS, never silently reinterpreted (ADR-011).",
     "manager_channel_by_org": "One Slack channel per Manager_Directory.Org value (Finance/Sales/Ops/Engineering/People) - never keyed on Workers.Job_Family, a different taxonomy (ARCHITECTURE.md §6).",
@@ -70,7 +84,7 @@ def build_rows(policy: dict) -> list:
             "justification": JUSTIFICATIONS.get(field_key, ""),
         })
 
-    for key in ("version", "as_of_date", "demo_mode"):
+    for key in ("version", "as_of_date", "demo_mode", "reason_codes"):
         add(key, "top-level", policy[key])
     for key, value in policy["thresholds"].items():
         add(key, "thresholds", value)
