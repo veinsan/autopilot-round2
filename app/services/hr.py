@@ -299,6 +299,19 @@ class SupabaseRepository:
             raise HTTPException(status_code=502, detail="Unable to update HR data")
         return response.json()
 
+    def delete(self, table: str, filters: dict[str, str]) -> list[dict[str, Any]]:
+        if not filters:
+            raise ValueError("Delete requires an explicit filter")
+        response = self._request(
+            "DELETE",
+            table,
+            headers=self._headers("return=representation"),
+            params=filters,
+        )
+        if response.is_error:
+            raise HTTPException(status_code=502, detail="Unable to delete HR data")
+        return response.json()
+
     def rpc(self, function: str, payload: dict[str, Any]) -> Any:
         response = self._request(
             "POST",

@@ -384,6 +384,56 @@ def create_policy(
     return {"version_id": version_id, "status": "draft"}
 
 
+@router.patch("/policies/{version_id}")
+def update_policy_draft(
+    version_id: str,
+    request: PolicyDraftRequest,
+    user: dict = Depends(get_current_user),
+    hr: HROpsService = Depends(service),
+):
+    """Edit a draft in place; simulated and historical snapshots stay immutable."""
+    require_hr_role(user, "admin", "people_ops")
+    errors = hr.evaluator.validate(request.config_snapshot)
+    if errors:
+        raise HTTPException(status_code=422, detail={"validation_errors": errors})
+    rows = hr.repo.patch(
+        "policy_versions",
+        {"version_id": f"eq.{version_id}", "status": "eq.draft"},
+        {
+            "config_snapshot": request.config_snapshot,
+            "change_summary": request.change_summary,
+            "snapshot_hash": snapshot_hash(request.config_snapshot),
+            "is_confidential_routing": hr.changes_confidential_routing(
+                request.config_snapshot
+            ),
+        },
+    )
+    if not rows:
+        raise HTTPException(
+            status_code=409, detail="Only draft policies can be edited"
+        )
+    return {"version_id": version_id, "status": "draft"}
+
+
+@router.delete("/policies/{version_id}")
+def delete_policy_draft(
+    version_id: str,
+    user: dict = Depends(get_current_user),
+    hr: HROpsService = Depends(service),
+):
+    """Delete an unsubmitted draft without allowing lifecycle history removal."""
+    require_hr_role(user, "admin", "people_ops")
+    rows = hr.repo.delete(
+        "policy_versions",
+        {"version_id": f"eq.{version_id}", "status": "eq.draft"},
+    )
+    if not rows:
+        raise HTTPException(
+            status_code=409, detail="Only draft policies can be deleted"
+        )
+    return {"version_id": version_id, "deleted": True}
+
+
 @router.post("/policies/simulations")
 def simulate_policy(
     request: PolicySimulationRequest,

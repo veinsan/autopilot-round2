@@ -91,3 +91,18 @@ credentials or confidential payloads.
 
 - Mistake: `docker compose up -d --build frontend` was given a 120-second tool timeout even though this repository's clean Next.js image build can take longer.
 - Prevention: build the frontend image separately with a longer bounded timeout, then restart only the already-built frontend service.
+
+### Keep PowerShell ripgrep patterns literal and small
+
+- Mistake: a combined `rg` expression was over-escaped inside a PowerShell command and failed before inspecting the repository methods.
+- Prevention: use single-quoted PowerShell regex patterns or separate simple `rg` searches instead of nesting escaped alternatives across shells.
+
+### Respect the configured backend base path
+
+- Mistake: a live OpenAPI check assumed `/openapi.json` even though this repository serves FastAPI under a configured base path, producing a misleading 404.
+- Prevention: read `BASE_PATH` or the compose environment before probing documentation and API routes.
+
+### Do not pass Windows wildcard paths directly to ripgrep
+
+- Mistake: a PowerShell inspection passed `frontend/tailwind.config.*` directly to `rg`, which Windows treated as an invalid literal path.
+- Prevention: discover matching files with `rg --files` first, or search the containing directory with a glob filter such as `-g 'tailwind.config.*'`.

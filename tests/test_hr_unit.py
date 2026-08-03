@@ -18,13 +18,20 @@ from pydantic import ValidationError
 from app.routers.hr import (
     act_on_case,
     dashboard as dashboard_endpoint,
+    delete_policy_draft,
     get_case,
     get_policy,
     insights as insights_endpoint,
     list_cases,
     record_manager_action_event,
+    update_policy_draft,
 )
-from app.schemas.hr import CaseActionRequest, ManagerActionEventRequest, RunRequest
+from app.schemas.hr import (
+    CaseActionRequest,
+    ManagerActionEventRequest,
+    PolicyDraftRequest,
+    RunRequest,
+)
 from app.services.auto import AutoWorkflowClient
 from app.services.hr import (
     HROpsService,
@@ -54,6 +61,7 @@ class FakeRepository:
         self.tables = tables or {}
         self.inserts: list[tuple[str, dict[str, Any]]] = []
         self.patches: list[tuple[str, dict[str, str], dict[str, Any]]] = []
+        self.deletes: list[tuple[str, dict[str, str]]] = []
         self.rpc_calls: list[tuple[str, dict[str, Any]]] = []
 
     def select(
@@ -107,6 +115,16 @@ class FakeRepository:
         for row in self.tables.get(table, []):
             if row in rows:
                 row.update(payload)
+        return rows
+
+    def delete(
+        self, table: str, filters: dict[str, str]
+    ) -> list[dict[str, Any]]:
+        self.deletes.append((table, dict(filters)))
+        rows = self.select(table, filters)
+        self.tables[table] = [
+            row for row in self.tables.get(table, []) if row not in rows
+        ]
         return rows
 
     def identity_profile(self, auth_subject: str) -> dict[str, Any] | None:
@@ -1056,3 +1074,75 @@ def test_policy_detail_returns_complete_snapshot_for_authorized_clone() -> None:
         hr=HROpsService(repo),  # type: ignore[arg-type]
     )
     assert result["config_snapshot"] == snapshot
+
+
+def test_policy_draft_can_be_edited_and_deleted_before_simulation() -> None:
+    original = round2_policy()
+    updated = json.loads(json.dumps(original))
+    updated["thresholds"]["minimum_cohort_size"] = 4
+    repo = FakeRepository(
+        {
+            "policy_versions": [
+                {
+                    "version_id": "policy-draft",
+                    "status": "draft",
+                    "config_snapshot": original,
+                    "change_summary": "Original draft",
+                }
+            ]
+        }
+    )
+    hr = HROpsService(repo)  # type: ignore[arg-type]
+    user = {"sub": "ops-1", "realm_access": {"roles": ["people_ops"]}}
+
+    result = update_policy_draft(
+        "policy-draft",
+        PolicyDraftRequest(
+            config_snapshot=updated,
+            change_summary="Updated draft settings",
+        ),
+        user=user,
+        hr=hr,
+    )
+
+    assert result == {"version_id": "policy-draft", "status": "draft"}
+    assert repo.tables["policy_versions"][0]["config_snapshot"] == updated
+    assert repo.tables["policy_versions"][0]["change_summary"] == "Updated draft settings"
+
+    deleted = delete_policy_draft("policy-draft", user=user, hr=hr)
+    assert deleted == {"version_id": "policy-draft", "deleted": True}
+    assert repo.tables["policy_versions"] == []
+
+
+@pytest.mark.parametrize("operation", ["edit", "delete"])
+def test_historical_policy_cannot_be_edited_or_deleted(operation: str) -> None:
+    snapshot = round2_policy()
+    repo = FakeRepository(
+        {
+            "policy_versions": [
+                {
+                    "version_id": "policy-active",
+                    "status": "active",
+                    "config_snapshot": snapshot,
+                }
+            ]
+        }
+    )
+    hr = HROpsService(repo)  # type: ignore[arg-type]
+    user = {"sub": "admin-1", "realm_access": {"roles": ["admin"]}}
+
+    with pytest.raises(HTTPException) as rejected:
+        if operation == "edit":
+            update_policy_draft(
+                "policy-active",
+                PolicyDraftRequest(
+                    config_snapshot=snapshot,
+                    change_summary="Must remain immutable",
+                ),
+                user=user,
+                hr=hr,
+            )
+        else:
+            delete_policy_draft("policy-active", user=user, hr=hr)
+
+    assert rejected.value.status_code == 409

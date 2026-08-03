@@ -7,6 +7,24 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 type Policy = {
   version_id: string
@@ -15,7 +33,11 @@ type Policy = {
   change_summary: string
   activated_at?: string
   parent_version_id?: string
+  created_by?: string
+  snapshot_hash?: string
 }
+
+type PolicyDetail = Policy & { config_snapshot: Record<string, unknown> }
 
 type SimulationResult = {
   workers_evaluated: number
@@ -113,6 +135,32 @@ function thresholdValue(
   }
 }
 
+const statusStyles: Record<string, string> = {
+  draft: 'border-amber-200 bg-amber-50 text-amber-800',
+  simulated: 'border-blue-200 bg-blue-50 text-blue-800',
+  approved: 'border-teal-200 bg-teal-50 text-teal-800',
+  active: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  retired: 'border-slate-200 bg-slate-100 text-slate-700',
+}
+
+function PolicyStatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${
+        statusStyles[status] ?? 'border-gray-200 bg-gray-50 text-gray-700'
+      }`}
+    >
+      {status}
+    </span>
+  )
+}
+
+function formatTimestamp(value?: string): string {
+  if (!value) return 'Not available'
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString()
+}
+
 export default function PolicyStudioPage() {
   const { data: session } = useSession()
   const roles = useMemo(() => new Set(session?.roles ?? []), [session?.roles])
@@ -126,28 +174,62 @@ export default function PolicyStudioPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [simulation, setSimulation] = useState<SimulationResult | null>(null)
+  const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null)
+  const [detailSnapshot, setDetailSnapshot] = useState('')
+  const [detailSummary, setDetailSummary] = useState('')
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false)
+  const [draftEditorOpen, setDraftEditorOpen] = useState(false)
 
-  const loadSnapshot = useCallback(async (policy: Policy) => {
+  const fetchPolicy = useCallback(async (policy: Policy) => {
+    const response = await apiClient<PolicyDetail>(
+      `/api/hr/policies/${policy.version_id}`
+    )
+    return response
+  }, [])
+
+  const loadSnapshot = useCallback(
+    async (policy: Policy) => {
+      try {
+        const detail = await fetchPolicy(policy)
+        setSnapshot(JSON.stringify(detail.config_snapshot, null, 2))
+        setBaseVersion(detail.version_id)
+        setMessage(
+          `The complete ${detail.version_id} snapshot is loaded as the editing baseline.`
+        )
+      } catch (error) {
+        setBaseVersion(null)
+        setMessage(
+          error instanceof Error
+            ? `The active snapshot could not be loaded: ${error.message}`
+            : 'The active snapshot could not be loaded.'
+        )
+      }
+    },
+    [fetchPolicy]
+  )
+
+  const openPolicyDetails = async (policy: Policy) => {
+    setSelectedPolicy(policy)
+    setDetailSummary(policy.change_summary)
+    setDetailSnapshot('')
+    setDetailLoading(true)
     try {
-      const response = await apiClient<
-        | { policy: Policy & { config_snapshot: Record<string, unknown> } }
-        | (Policy & { config_snapshot: Record<string, unknown> })
-      >(`/api/hr/policies/${policy.version_id}`)
-      const detail = 'policy' in response ? response.policy : response
-      setSnapshot(JSON.stringify(detail.config_snapshot, null, 2))
-      setBaseVersion(detail.version_id)
-      setMessage(
-        `The complete ${detail.version_id} snapshot is loaded as the editing baseline.`
-      )
+      const detail = await fetchPolicy(policy)
+      setSelectedPolicy(detail)
+      setDetailSummary(detail.change_summary)
+      setDetailSnapshot(JSON.stringify(detail.config_snapshot, null, 2))
     } catch (error) {
-      setBaseVersion(null)
       setMessage(
         error instanceof Error
-          ? `The active snapshot could not be loaded: ${error.message}`
-          : 'The active snapshot could not be loaded.'
+          ? `Policy details could not be loaded: ${error.message}`
+          : 'Policy details could not be loaded.'
       )
+      setSelectedPolicy(null)
+    } finally {
+      setDetailLoading(false)
     }
-  }, [])
+  }
 
   const load = useCallback(
     async (withActiveSnapshot = false) => {
@@ -260,6 +342,7 @@ export default function PolicyStudioPage() {
         'Draft created. Run a simulation before approval and activation.'
       )
       setSummary('')
+      setDraftEditorOpen(false)
       await load()
     } catch (error) {
       setMessage(
@@ -337,26 +420,103 @@ export default function PolicyStudioPage() {
     }
   }
 
+  const saveDraftChanges = async () => {
+    if (!selectedPolicy || selectedPolicy.status !== 'draft') return
+    setBusy(`edit:${selectedPolicy.version_id}`)
+    try {
+      const configSnapshot = parseSnapshot(detailSnapshot)
+      await apiClient(`/api/hr/policies/${selectedPolicy.version_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          change_summary: detailSummary,
+          config_snapshot: configSnapshot,
+        }),
+      })
+      setSelectedPolicy({
+        ...selectedPolicy,
+        change_summary: detailSummary,
+      })
+      await load()
+      setMessage(`Draft ${selectedPolicy.version_id} was updated.`)
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'The draft could not be updated.'
+      )
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const deleteDraft = async () => {
+    if (!selectedPolicy || selectedPolicy.status !== 'draft') return
+    const deletedVersion = selectedPolicy.version_id
+    const deletedWasBaseline = baseVersion === deletedVersion
+    setBusy(`delete:${deletedVersion}`)
+    try {
+      await apiClient(`/api/hr/policies/${deletedVersion}`, {
+        method: 'DELETE',
+      })
+      setDeleteConfirmationOpen(false)
+      setSelectedPolicy(null)
+      if (deletedWasBaseline) {
+        setBaseVersion(null)
+        setSnapshot('')
+      }
+      await load(deletedWasBaseline)
+      setMessage(`Draft ${deletedVersion} was deleted.`)
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'The draft could not be deleted.'
+      )
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const useAsDraftBaseline = () => {
+    if (!selectedPolicy || !detailSnapshot) return
+    setSnapshot(detailSnapshot)
+    setBaseVersion(selectedPolicy.version_id)
+    setSummary(`Draft derived from ${selectedPolicy.version_id}`)
+    setSelectedPolicy(null)
+    setDraftEditorOpen(true)
+    setMessage(
+      `Policy baseline: ${selectedPolicy.version_id}. Edit the fields, then save a new draft.`
+    )
+  }
+
   const actionLabel = (policy: Policy) => {
-    if (policy.status === 'draft' && canDraft) return 'Simulate'
-    if (policy.status === 'simulated' && canApprove) return 'Approve'
-    if (policy.status === 'approved' && isAdmin) return 'Activate'
+    if (policy.status === 'draft' && canDraft) return 'Simulate policy'
+    if (policy.status === 'simulated' && canApprove) return 'Approve policy'
+    if (policy.status === 'approved' && isAdmin) return 'Activate policy'
     return null
   }
 
   return (
     <div className='space-y-6'>
-      <div>
-        <p className='text-sm font-medium text-brand-cornflower'>
-          Governed configuration
-        </p>
-        <h1 className='text-display-3 font-bold tracking-tight text-brand-navy'>
-          Policy Studio
-        </h1>
-        <p className='mt-2 text-muted-foreground'>
-          Compliance, payroll, and manager accountability are governed through
-          immutable, simulatable, and auditable snapshots.
-        </p>
+      <div className='flex flex-col justify-between gap-4 sm:flex-row sm:items-end'>
+        <div>
+          <p className='text-sm font-medium text-brand-cornflower'>
+            Governed configuration
+          </p>
+          <h1 className='text-display-3 font-bold tracking-tight text-brand-navy'>
+            Policy Studio
+          </h1>
+          <p className='mt-2 text-muted-foreground'>
+            Compliance, payroll, and manager accountability are governed through
+            immutable, simulatable, and auditable snapshots.
+          </p>
+        </div>
+        {canDraft && (
+          <Button variant='gradient' onClick={() => setDraftEditorOpen(true)}>
+            Create policy draft
+          </Button>
+        )}
       </div>
 
       {message && (
@@ -376,47 +536,68 @@ export default function PolicyStudioPage() {
             const label = actionLabel(policy)
             return (
               <Card key={policy.version_id}>
-                <CardContent className='p-4'>
-                  <div className='flex flex-col justify-between gap-4 sm:flex-row sm:items-center'>
-                    <div>
-                      <p className='font-medium text-brand-navy'>
-                        {policy.change_summary}
-                      </p>
-                      <p className='mt-1 font-mono text-xs text-muted-foreground'>
-                        {policy.version_id}
-                      </p>
-                      {policy.parent_version_id && (
-                        <p className='mt-1 text-xs text-muted-foreground'>
-                          Derived from {policy.parent_version_id}
-                        </p>
-                      )}
-                    </div>
-                    <div className='flex flex-wrap items-center gap-2'>
-                      <span className='rounded-full bg-brand-cornflower/15 px-2 py-1 text-xs font-semibold capitalize text-brand-navy'>
-                        {policy.status}
-                      </span>
-                      {label && (
+                <CardContent className='space-y-4 p-4'>
+                  <PolicyStatusBadge status={policy.status} />
+
+                  <div>
+                    <p className='font-medium text-brand-navy'>
+                      {policy.change_summary}
+                    </p>
+                    <dl className='mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2'>
+                      <div>
+                        <dt className='font-semibold text-foreground'>
+                          Policy ID
+                        </dt>
+                        <dd className='break-all font-mono'>
+                          {policy.version_id}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className='font-semibold text-foreground'>
+                          Derived from
+                        </dt>
+                        <dd className='break-all font-mono'>
+                          {policy.parent_version_id ??
+                            'Initial policy baseline'}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+
+                  <div className='flex flex-wrap items-center gap-2 border-t pt-4'>
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      disabled={busy !== null}
+                      onClick={() => void openPolicyDetails(policy)}
+                    >
+                      View details
+                    </Button>
+                    {label && (
+                      <Button
+                        size='sm'
+                        variant={
+                          policy.status === 'approved' ? 'gradient' : 'outline'
+                        }
+                        loading={busy === policy.version_id}
+                        disabled={busy !== null && busy !== policy.version_id}
+                        onClick={() => advance(policy)}
+                      >
+                        {label}
+                      </Button>
+                    )}
+                    {isAdmin &&
+                      ['active', 'retired'].includes(policy.status) && (
                         <Button
                           size='sm'
-                          variant='outline'
+                          variant='ghost'
                           loading={busy === policy.version_id}
-                          onClick={() => advance(policy)}
+                          disabled={busy !== null && busy !== policy.version_id}
+                          onClick={() => rollback(policy)}
                         >
-                          {label}
+                          Create rollback draft
                         </Button>
                       )}
-                      {isAdmin &&
-                        ['active', 'retired'].includes(policy.status) && (
-                          <Button
-                            size='sm'
-                            variant='ghost'
-                            disabled={busy === policy.version_id}
-                            onClick={() => rollback(policy)}
-                          >
-                            Create rollback draft
-                          </Button>
-                        )}
-                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -429,8 +610,13 @@ export default function PolicyStudioPage() {
               </CardContent>
             </Card>
           )}
+        </div>
 
-          {simulation && (
+        <div className='space-y-3'>
+          <h2 className='text-lg font-semibold text-brand-navy'>
+            Simulation result
+          </h2>
+          {simulation ? (
             <Card>
               <CardHeader>
                 <CardTitle>Simulation impact</CardTitle>
@@ -468,214 +654,417 @@ export default function PolicyStudioPage() {
                 )}
               </CardContent>
             </Card>
+          ) : (
+            <Card>
+              <CardContent className='p-5 text-sm text-muted-foreground'>
+                Run a draft simulation to compare its findings with the active
+                policy. The result will appear here without creating cases or
+                sending notifications.
+              </CardContent>
+            </Card>
           )}
         </div>
 
-        <div className='space-y-4'>
-          <Card>
-            <CardHeader>
-              <CardTitle>Round 2 policy fields</CardTitle>
-            </CardHeader>
-            <CardContent className='space-y-6'>
-              <p className='text-sm text-muted-foreground'>
-                Changes below are merged into the JSON snapshot. Values must
-                come from an approved HR policy.
-              </p>
-              {policyGroups.map((group) => (
-                <section key={group.title} className='space-y-3'>
-                  <div>
-                    <h3 className='font-semibold text-brand-navy'>
-                      {group.title}
-                    </h3>
-                    <p className='text-xs text-muted-foreground'>
-                      {group.description}
-                    </p>
-                  </div>
-                  {group.fields.map(([key, label]) => (
-                    <div key={key} className='space-y-2'>
-                      <Label>{label}</Label>
-                      <div className='grid grid-cols-3 gap-2 sm:grid-cols-6'>
-                        {jurisdictions.map((jurisdiction) => (
-                          <label
-                            key={jurisdiction}
-                            className='space-y-1 text-xs text-muted-foreground'
-                          >
-                            <span>
-                              {jurisdiction === 'default'
-                                ? 'Default'
-                                : jurisdiction}
-                            </span>
-                            <Input
-                              type='number'
-                              min={0}
-                              value={thresholdValue(
-                                snapshot,
-                                key,
-                                jurisdiction
-                              )}
-                              onChange={(event) =>
-                                setThreshold(
-                                  key,
-                                  event.target.value,
-                                  jurisdiction
-                                )
-                              }
-                              aria-label={`${label} ${jurisdiction}`}
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </section>
-              ))}
-              <section className='space-y-3'>
-                <div>
-                  <h3 className='font-semibold text-brand-navy'>
-                    Manager & cohort safeguards
-                  </h3>
-                  <p className='text-xs text-muted-foreground'>
-                    Cadence, action deadlines, reminders, and bottleneck
-                    thresholds.
+        <Dialog open={draftEditorOpen} onOpenChange={setDraftEditorOpen}>
+          <DialogContent className='max-h-[calc(100dvh-10rem)] max-w-5xl overflow-y-auto'>
+            <DialogHeader>
+              <DialogTitle>Create policy draft</DialogTitle>
+              <DialogDescription>
+                Adjust governed Round 2 fields or the complete JSON snapshot,
+                then save a new draft for simulation.
+              </DialogDescription>
+            </DialogHeader>
+            <div className='grid gap-4 lg:grid-cols-2'>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Round 2 policy fields</CardTitle>
+                </CardHeader>
+                <CardContent className='space-y-6'>
+                  <p className='text-sm text-muted-foreground'>
+                    Changes below are merged into the JSON snapshot. Values must
+                    come from an approved HR policy.
                   </p>
-                </div>
-                <div className='space-y-3'>
-                  {managerJurisdictionThresholds.map(([key, label]) => (
-                    <div key={key} className='space-y-2'>
-                      <Label>{label}</Label>
-                      <div className='grid grid-cols-3 gap-2 sm:grid-cols-6'>
-                        {jurisdictions.map((jurisdiction) => (
-                          <label
-                            key={jurisdiction}
-                            className='space-y-1 text-xs text-muted-foreground'
-                          >
-                            <span>
-                              {jurisdiction === 'default'
-                                ? 'Default'
-                                : jurisdiction}
-                            </span>
-                            <Input
-                              type='number'
-                              min={0}
-                              value={thresholdValue(
-                                snapshot,
-                                key,
-                                jurisdiction
-                              )}
-                              onChange={(event) =>
-                                setThreshold(
-                                  key,
-                                  event.target.value,
-                                  jurisdiction
-                                )
-                              }
-                              aria-label={`${label} ${jurisdiction}`}
-                            />
-                          </label>
-                        ))}
+                  {policyGroups.map((group) => (
+                    <section key={group.title} className='space-y-3'>
+                      <div>
+                        <h3 className='font-semibold text-brand-navy'>
+                          {group.title}
+                        </h3>
+                        <p className='text-xs text-muted-foreground'>
+                          {group.description}
+                        </p>
                       </div>
+                      {group.fields.map(([key, label]) => (
+                        <div key={key} className='space-y-2'>
+                          <Label>{label}</Label>
+                          <div className='grid grid-cols-3 gap-2 sm:grid-cols-6'>
+                            {jurisdictions.map((jurisdiction) => (
+                              <label
+                                key={jurisdiction}
+                                className='space-y-1 text-xs text-muted-foreground'
+                              >
+                                <span>
+                                  {jurisdiction === 'default'
+                                    ? 'Default'
+                                    : jurisdiction}
+                                </span>
+                                <Input
+                                  type='number'
+                                  min={0}
+                                  value={thresholdValue(
+                                    snapshot,
+                                    key,
+                                    jurisdiction
+                                  )}
+                                  onChange={(event) =>
+                                    setThreshold(
+                                      key,
+                                      event.target.value,
+                                      jurisdiction
+                                    )
+                                  }
+                                  aria-label={`${label} ${jurisdiction}`}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </section>
+                  ))}
+                  <section className='space-y-3'>
+                    <div>
+                      <h3 className='font-semibold text-brand-navy'>
+                        Manager & cohort safeguards
+                      </h3>
+                      <p className='text-xs text-muted-foreground'>
+                        Cadence, action deadlines, reminders, and bottleneck
+                        thresholds.
+                      </p>
                     </div>
-                  ))}
-                </div>
-                <div className='grid gap-3 sm:grid-cols-2'>
-                  {globalThresholds.map(([key, label]) => (
-                    <label
-                      key={key}
-                      className='space-y-1 text-xs text-muted-foreground'
-                    >
-                      <span>{label}</span>
-                      <Input
-                        type='number'
-                        min={0}
-                        value={thresholdValue(snapshot, key)}
-                        onChange={(event) =>
-                          setThreshold(key, event.target.value)
-                        }
-                        aria-label={label}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </section>
-              <Button
-                type='button'
-                size='sm'
-                variant='outline'
-                onClick={ensureRoundTwoCodes}
-              >
-                Complete the reason-code registry
-              </Button>
-            </CardContent>
-          </Card>
+                    <div className='space-y-3'>
+                      {managerJurisdictionThresholds.map(([key, label]) => (
+                        <div key={key} className='space-y-2'>
+                          <Label>{label}</Label>
+                          <div className='grid grid-cols-3 gap-2 sm:grid-cols-6'>
+                            {jurisdictions.map((jurisdiction) => (
+                              <label
+                                key={jurisdiction}
+                                className='space-y-1 text-xs text-muted-foreground'
+                              >
+                                <span>
+                                  {jurisdiction === 'default'
+                                    ? 'Default'
+                                    : jurisdiction}
+                                </span>
+                                <Input
+                                  type='number'
+                                  min={0}
+                                  value={thresholdValue(
+                                    snapshot,
+                                    key,
+                                    jurisdiction
+                                  )}
+                                  onChange={(event) =>
+                                    setThreshold(
+                                      key,
+                                      event.target.value,
+                                      jurisdiction
+                                    )
+                                  }
+                                  aria-label={`${label} ${jurisdiction}`}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className='grid gap-3 sm:grid-cols-2'>
+                      {globalThresholds.map(([key, label]) => (
+                        <label
+                          key={key}
+                          className='space-y-1 text-xs text-muted-foreground'
+                        >
+                          <span>{label}</span>
+                          <Input
+                            type='number'
+                            min={0}
+                            value={thresholdValue(snapshot, key)}
+                            onChange={(event) =>
+                              setThreshold(key, event.target.value)
+                            }
+                            aria-label={label}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    onClick={ensureRoundTwoCodes}
+                  >
+                    Complete the reason-code registry
+                  </Button>
+                </CardContent>
+              </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Create a draft</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form className='space-y-4' onSubmit={create}>
-                <Input
-                  value={summary}
-                  onChange={(event) => setSummary(event.target.value)}
-                  minLength={3}
-                  placeholder='Change summary'
-                  required
-                  disabled={!canDraft || !baseVersion}
-                />
-                <div className='space-y-2'>
-                  <Label htmlFor='policy-json'>
-                    Complete snapshot (advanced)
-                  </Label>
-                  <textarea
-                    id='policy-json'
-                    value={snapshot}
-                    onChange={(event) => setSnapshot(event.target.value)}
-                    className='min-h-72 w-full rounded-lg border border-input bg-white p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-brand-cornflower/50'
-                    aria-label='Policy configuration JSON'
-                    spellCheck={false}
-                    disabled={!canDraft || !baseVersion}
-                  />
-                  <p className='text-xs text-muted-foreground'>
-                    Baseline: {baseVersion ?? 'not loaded'}. A draft is a
-                    complete snapshot; routing, normalization, templates, retry
-                    settings, and active guardrails are preserved.
-                  </p>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Create a draft</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <form className='space-y-4' onSubmit={create}>
+                    <Input
+                      value={summary}
+                      onChange={(event) => setSummary(event.target.value)}
+                      minLength={3}
+                      placeholder='Change summary'
+                      required
+                      disabled={!canDraft || !baseVersion}
+                    />
+                    <div className='space-y-2'>
+                      <Label htmlFor='policy-json'>
+                        Complete snapshot (advanced)
+                      </Label>
+                      <textarea
+                        id='policy-json'
+                        value={snapshot}
+                        onChange={(event) => setSnapshot(event.target.value)}
+                        className='min-h-72 w-full rounded-lg border border-input bg-white p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-brand-cornflower/50'
+                        aria-label='Policy configuration JSON'
+                        spellCheck={false}
+                        disabled={!canDraft || !baseVersion}
+                      />
+                      <p className='text-xs text-muted-foreground'>
+                        <span className='font-semibold text-foreground'>
+                          Policy baseline:
+                        </span>{' '}
+                        <span className='font-mono'>
+                          {baseVersion ?? 'Not loaded'}
+                        </span>
+                        . A draft is a complete snapshot; routing,
+                        normalization, templates, retry settings, and active
+                        guardrails are preserved.
+                      </p>
+                    </div>
+                    <Button
+                      type='submit'
+                      variant='gradient'
+                      loading={busy === 'create'}
+                      disabled={!canDraft || !baseVersion}
+                    >
+                      Save as draft
+                    </Button>
+                    {canDraft && !baseVersion && (
+                      <Button
+                        type='button'
+                        variant='outline'
+                        onClick={() => {
+                          const active = policies.find(
+                            (policy) => policy.status === 'active'
+                          )
+                          if (active) void loadSnapshot(active)
+                        }}
+                        disabled={
+                          !policies.some((policy) => policy.status === 'active')
+                        }
+                      >
+                        Reload active snapshot
+                      </Button>
+                    )}
+                    {!canDraft && (
+                      <p className='text-xs text-muted-foreground'>
+                        Your role can only review or approve policies.
+                      </p>
+                    )}
+                  </form>
+                </CardContent>
+              </Card>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <Dialog
+        open={selectedPolicy !== null}
+        onOpenChange={(open) => {
+          if (!open && busy === null) setSelectedPolicy(null)
+        }}
+      >
+        <DialogContent className='max-h-[calc(100dvh-10rem)] max-w-4xl overflow-y-auto'>
+          {selectedPolicy && (
+            <>
+              <DialogHeader>
+                <PolicyStatusBadge status={selectedPolicy.status} />
+                <DialogTitle>Policy details</DialogTitle>
+                <DialogDescription>
+                  Review metadata and the complete governed configuration
+                  snapshot. Drafts remain editable until they are simulated.
+                </DialogDescription>
+              </DialogHeader>
+
+              <dl className='grid gap-3 rounded-lg border bg-slate-50 p-4 text-sm sm:grid-cols-2'>
+                <div>
+                  <dt className='font-semibold text-brand-navy'>Policy ID</dt>
+                  <dd className='break-all font-mono text-xs text-muted-foreground'>
+                    {selectedPolicy.version_id}
+                  </dd>
                 </div>
-                <Button
-                  type='submit'
-                  variant='gradient'
-                  loading={busy === 'create'}
-                  disabled={!canDraft || !baseVersion}
-                >
-                  Save as draft
-                </Button>
-                {canDraft && !baseVersion && (
+                <div>
+                  <dt className='font-semibold text-brand-navy'>
+                    Derived from
+                  </dt>
+                  <dd className='break-all font-mono text-xs text-muted-foreground'>
+                    {selectedPolicy.parent_version_id ??
+                      'Initial policy baseline'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className='font-semibold text-brand-navy'>Created at</dt>
+                  <dd className='text-muted-foreground'>
+                    {formatTimestamp(selectedPolicy.created_at)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className='font-semibold text-brand-navy'>Created by</dt>
+                  <dd className='break-all text-muted-foreground'>
+                    {selectedPolicy.created_by ?? 'Not available'}
+                  </dd>
+                </div>
+                {selectedPolicy.activated_at && (
+                  <div>
+                    <dt className='font-semibold text-brand-navy'>
+                      Activated at
+                    </dt>
+                    <dd className='text-muted-foreground'>
+                      {formatTimestamp(selectedPolicy.activated_at)}
+                    </dd>
+                  </div>
+                )}
+                {selectedPolicy.snapshot_hash && (
+                  <div>
+                    <dt className='font-semibold text-brand-navy'>
+                      Snapshot hash
+                    </dt>
+                    <dd className='break-all font-mono text-xs text-muted-foreground'>
+                      {selectedPolicy.snapshot_hash}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+
+              <div className='space-y-2'>
+                <Label htmlFor='detail-change-summary'>Change summary</Label>
+                <Input
+                  id='detail-change-summary'
+                  value={detailSummary}
+                  minLength={3}
+                  onChange={(event) => setDetailSummary(event.target.value)}
+                  disabled={
+                    detailLoading ||
+                    selectedPolicy.status !== 'draft' ||
+                    !canDraft
+                  }
+                />
+              </div>
+
+              <div className='space-y-2'>
+                <Label htmlFor='detail-policy-json'>Full policy snapshot</Label>
+                <textarea
+                  id='detail-policy-json'
+                  value={
+                    detailLoading
+                      ? 'Loading the complete snapshot…'
+                      : detailSnapshot
+                  }
+                  onChange={(event) => setDetailSnapshot(event.target.value)}
+                  className='min-h-80 w-full rounded-lg border border-input bg-white p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-cornflower/50 disabled:bg-slate-50'
+                  aria-label='Full policy snapshot JSON'
+                  spellCheck={false}
+                  disabled={
+                    detailLoading ||
+                    selectedPolicy.status !== 'draft' ||
+                    !canDraft
+                  }
+                />
+                <p className='text-xs text-muted-foreground'>
+                  {selectedPolicy.status === 'draft' && canDraft
+                    ? 'This draft can be edited or deleted until simulation starts.'
+                    : 'This lifecycle snapshot is read-only to preserve its audit history.'}
+                </p>
+              </div>
+
+              <DialogFooter className='gap-2 border-t pt-4 sm:space-x-0'>
+                {selectedPolicy.status === 'draft' && canDraft && (
+                  <Button
+                    type='button'
+                    variant='destructive'
+                    disabled={busy !== null || detailLoading}
+                    onClick={() => setDeleteConfirmationOpen(true)}
+                  >
+                    Delete draft
+                  </Button>
+                )}
+                {canDraft && (
                   <Button
                     type='button'
                     variant='outline'
-                    onClick={() => {
-                      const active = policies.find(
-                        (policy) => policy.status === 'active'
-                      )
-                      if (active) void loadSnapshot(active)
-                    }}
-                    disabled={
-                      !policies.some((policy) => policy.status === 'active')
-                    }
+                    disabled={busy !== null || detailLoading || !detailSnapshot}
+                    onClick={useAsDraftBaseline}
                   >
-                    Reload active snapshot
+                    Use as draft baseline
                   </Button>
                 )}
-                {!canDraft && (
-                  <p className='text-xs text-muted-foreground'>
-                    Your role can only review or approve policies.
-                  </p>
+                {selectedPolicy.status === 'draft' && canDraft && (
+                  <Button
+                    type='button'
+                    variant='gradient'
+                    loading={busy === `edit:${selectedPolicy.version_id}`}
+                    disabled={
+                      busy !== null ||
+                      detailLoading ||
+                      detailSummary.trim().length < 3
+                    }
+                    onClick={() => void saveDraftChanges()}
+                  >
+                    Save draft changes
+                  </Button>
                 )}
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={deleteConfirmationOpen}
+        onOpenChange={setDeleteConfirmationOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Draft {selectedPolicy?.version_id} will be permanently removed.
+              Simulated and historical policies cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy !== null}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
+              disabled={busy !== null}
+              onClick={() => void deleteDraft()}
+            >
+              Delete draft
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

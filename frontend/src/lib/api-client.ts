@@ -12,7 +12,9 @@ function formatValidationItem(item: unknown): string | null {
   if (!message) return null
 
   const location = Array.isArray(entry.loc)
-    ? entry.loc.filter((part) => typeof part === 'string' || typeof part === 'number').join('.')
+    ? entry.loc
+        .filter((part) => typeof part === 'string' || typeof part === 'number')
+        .join('.')
     : ''
   return location ? `${location}: ${message}` : message
 }
@@ -37,7 +39,10 @@ export function formatApiErrorDetail(detail: unknown): string {
       }
     }
 
-    if (typeof objectDetail.message === 'string' && objectDetail.message.trim()) {
+    if (
+      typeof objectDetail.message === 'string' &&
+      objectDetail.message.trim()
+    ) {
       return objectDetail.message
     }
   }
@@ -51,7 +56,10 @@ export function formatApiErrorDetail(detail: unknown): string {
  *                 The endpoint should include the '/api' prefix.
  * @param options Standard fetch options (method, body, etc.).
  */
-async function apiClientFetch<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function apiClientFetch<T = unknown>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
   const session = await getSession()
 
   const headers = new Headers(options.headers || {})
@@ -99,7 +107,11 @@ export const apiClient = {
   /**
    * Perform a POST request.
    */
-  post: <T = unknown>(endpoint: string, data?: unknown, options?: RequestInit): Promise<T> => {
+  post: <T = unknown>(
+    endpoint: string,
+    data?: unknown,
+    options?: RequestInit
+  ): Promise<T> => {
     return apiClientFetch<T>(endpoint, {
       ...options,
       method: 'POST',
@@ -114,7 +126,11 @@ export const apiClient = {
   /**
    * Perform a PUT request.
    */
-  put: <T = unknown>(endpoint: string, data?: unknown, options?: RequestInit): Promise<T> => {
+  put: <T = unknown>(
+    endpoint: string,
+    data?: unknown,
+    options?: RequestInit
+  ): Promise<T> => {
     return apiClientFetch<T>(endpoint, {
       ...options,
       method: 'PUT',
@@ -129,7 +145,11 @@ export const apiClient = {
   /**
    * Perform a PATCH request.
    */
-  patch: <T = unknown>(endpoint: string, data?: unknown, options?: RequestInit): Promise<T> => {
+  patch: <T = unknown>(
+    endpoint: string,
+    data?: unknown,
+    options?: RequestInit
+  ): Promise<T> => {
     return apiClientFetch<T>(endpoint, {
       ...options,
       method: 'PATCH',
@@ -144,7 +164,10 @@ export const apiClient = {
   /**
    * Perform a DELETE request.
    */
-  delete: <T = unknown>(endpoint: string, options?: RequestInit): Promise<T> => {
+  delete: <T = unknown>(
+    endpoint: string,
+    options?: RequestInit
+  ): Promise<T> => {
     return apiClientFetch<T>(endpoint, { ...options, method: 'DELETE' })
   },
 }
