@@ -344,15 +344,36 @@ STEP 5 — Group and log.
 
 **Tests:**
 
-| # | Scenario | Input/setup | Expected |
-|---|---|---|---|
-| 1 | Legal breach | `EMP7054`, `as_of=2026-08-03` | `COMPLIANCE_LEGAL_BREACH`; evidence includes `CMP-80109`; blank worker expiry does not create work-auth reason. |
-| 2 | Deadline at risk | `EMP7032`, same as-of | `COMPLIANCE_DEADLINE_AT_RISK`; evidence includes `CMP-80065`. Test OP-05 alone because this employee also has payroll Error. |
-| 3 | Clear employee | `EMP7099`, same as-of | Empty reasons for OP-05. |
-| 4 | Work auth near expiry | `EMP7099`, controlled `as_of=2027-03-30` | `WORK_AUTH_EXPIRY_AT_RISK` (29 days to 2027-04-28 with 30-day policy). |
-| 5 | Work auth expired | `EMP7099`, controlled `as_of=2027-04-29` | `WORK_AUTH_EXPIRED`. |
-| 6 | Boundary policy change | Run an expiry 20 days away with active threshold 10, then an approved/active threshold 30 | First run CLEAR; second run AT_RISK; both evaluations name their distinct policy versions. |
-| 7 | Duplicate delivery | Run the same `execution_id` twice | No duplicate `policy_evaluations` rows. |
+Jalankan sesuai kolom **Urutan** (bukan urutan nomor `#`) — ini menghormati dependensi
+antar-test: test 7 harus langsung setelah test 1 memakai `execution_id` yang sama, dan
+test yang mem-pin `as_of_date`/threshold mengubah `policy_versions` yang sedang
+`active`, jadi harus dikelompokkan dan di-revert sebelum test lain lanjut.
+
+Field yang sama di semua baris (tidak diulang di tabel): `command_id` = sama dengan
+`execution_id`; `trigger_source` = `command_center`.
+
+| Urutan | # | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan sebelum run |
+|---|---|---|---|---|---|---|
+| 1 | 3 | Clear employee | `EMP7099` | `cmd_746f8376c86bd2da4646026aef7ff3d6` | `reasons: []`, `findings: []` (both compliance items Verified) | Tidak ada |
+| 2 | 1 | Legal breach | `EMP7054` | `cmd_b46f034307cb6582c3a738ab86e2dc3b` | `COMPLIANCE_LEGAL_BREACH`, critical; evidence `CMP-80109`; blank worker expiry → tidak ada reason work-auth | Tidak ada |
+| 3 | 7 | Duplicate delivery | `EMP7054` | **sama persis dengan #2**: `cmd_b46f034307cb6582c3a738ab86e2dc3b` | Findings identik dengan #2; **tidak ada** baris `policy_evaluations` baru | Jalankan langsung setelah #2, sebelum policy aktif berubah |
+| 4 | 2 | Deadline at risk | `EMP7032` | `cmd_9693abbe1222df2a19830260b86427d0` | `COMPLIANCE_DEADLINE_AT_RISK`, high; evidence `CMP-80065`. Uji OP-05 sendiri — employee ini juga punya payroll Error, jangan sampai bocor | Pin `config_snapshot.as_of_date="2026-08-03"` lewat Policy Studio (draft→simulate→approve→activate) |
+| 5 | 8 | Item/worker jurisdiction mismatch | `EMP7032` | `cmd_f718417ddebcf8316b38fd51cfee7fb2` | Item-level data-quality `system_exception`; item lain tetap dievaluasi normal | Clone `CMP-80065` → item baru dengan `jurisdiction=MY` |
+| 6 | 9 | Missing/invalid due_date | `EMP7000` | `cmd_97b69ef0a17f1ebe8656ba5b10a4dff1` | Item-level data-quality `system_exception`; `CMP-80002` (item asli) tetap dievaluasi normal | Clone `CMP-80001` → item baru dengan `due_date` dikosongkan |
+| 7 | 4 | Work auth near expiry | `EMP7099` | `cmd_d21b9c9caa1c0044656800ce825a2d8a` | `WORK_AUTH_EXPIRY_AT_RISK` (29 hari ke `2027-04-28`, threshold 30) | Pin `as_of_date="2027-03-30"` |
+| 8 | 5 | Work auth expired | `EMP7099` | `cmd_8fea1318a222c5f928767861e6a55401` | `WORK_AUTH_EXPIRED` | Pin `as_of_date="2027-04-29"` |
+| 9 | 6a | Boundary policy change — sebelum | `EMP7099` | `cmd_31b3d3c7a7b5f2739e1566eb13df0d20` | CLEAR (20 hari > threshold 10) | Pin `as_of_date="2027-04-08"` **dan** `work_auth_expiry_at_risk_days.default=10` |
+| 10 | 6b | Boundary policy change — sesudah | `EMP7099` | `cmd_184ed215f84a8c5b3049fa8aab33cacc` | `WORK_AUTH_EXPIRY_AT_RISK` (20 hari ≤ threshold 30); evaluasi #9 dan #10 masing-masing mencatat `policy_version_id` yang berbeda | as_of tetap sama; ubah threshold ke `30` lewat policy version baru (approved/active) |
+| 11 | 10 | Invalid jurisdiction threshold | `EMP7032` | `cmd_4d0a62607dff26936e9daeaa6ec5971a` | Whole-employee `system_exception`; tidak ada finding, tidak ada nilai default rekaan | Set `compliance_at_risk_days` ke nilai non-numerik/negatif — **jangan aktifkan di policy produksi**; pakai context override pada satu test-run di Auto Studio bila didukung, jika tidak lakukan di luar jam produksi dan revert segera |
+
+Setelah baris #11 selesai, **reaktivasi `policy_round2_v1` versi asli**
+(`as_of_date=null`, `compliance_at_risk_days.default=14`,
+`work_auth_expiry_at_risk_days.default=30`) sebelum menjalankan stage/test lain.
+
+> Gunakan format tabel ini (Urutan / # / Scenario / employee_id / execution_id /
+> Expected output / Tindakan tambahan, plus catatan `command_id`+`trigger_source`
+> bersama di atas tabel) untuk daftar tes stage-stage berikutnya (5.3, 6.x, 7.x,
+> dan seterusnya) begitu prompt masing-masing sudah final.
 
 ### 5.3 — OP-05 failure behavior
 
@@ -375,9 +396,21 @@ Continue "OP-05 Compliance & Work Authorization".
   full policy snapshots, or stack traces.
 ```
 
-**Tests:** malformed one-item/valid one-item input still returns the valid
-finding; a forced Supabase write failure is visible as a system exception and
-does not fabricate a successful evaluation log.
+**Tests:**
+
+Field yang sama di semua baris: `command_id` = sama dengan `execution_id`;
+`trigger_source` = `command_center`.
+
+| Urutan | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan sebelum run |
+|---|---|---|---|---|---|
+| 1 | Stop on read failure (regresi ujung-ke-ujung) | `EMP-NOT-FOUND` | `cmd_8774c85d31000a84a4587c3af702218f` | Tepat satu `system_exceptions` (`WORKER_NOT_FOUND`); `findings: []`; tidak ada compliance/work-auth item yang dievaluasi; tidak ada baris `policy_evaluations` ditulis | Tidak ada |
+| 2 | Isolasi item malformed (item lain + work-auth tetap dievaluasi) | `EMP7032` | `cmd_1735fe99ed2b02cb94a9728ea9436f6e` | `findings` tetap berisi `COMPLIANCE_DEADLINE_AT_RISK` (evidence `CMP-80065`); `system_exceptions` berisi satu data-quality exception level-item untuk item hasil clone; cek `policy_evaluations` ada baris work-authorization untuk `EMP7032` (CLEAR/AT_RISK) — buktikan work-auth tidak ikut ter-skip | Pin `as_of_date="2026-08-03"`; clone `CMP-80066` → item baru dengan `due_date` dikosongkan (malformed), biarkan `CMP-80065` asli tetap ada |
+| 3 | Kegagalan tulis `policy_evaluations` (retry habis) | `EMP7032` | `cmd_e34a1f414d180370d2b07113bf5ebcb8` | `findings` tetap berisi `COMPLIANCE_DEADLINE_AT_RISK` (tidak hilang meski tulis gagal); `system_exceptions` berisi satu integration-failure exception setelah retry profile aktif habis (`max_attempts=3`, backoff `5/20/60`s ≈ sampai ~85 detik); query `policy_evaluations` untuk `evaluation_id` run ini **tidak ada baris** — buktikan tidak ada klaim persisted palsu | Pin `as_of_date="2026-08-03"` (pakai sisa data `CMP-80065` asli, tanpa clone); sebelum run, arahkan sementara endpoint tulis STEP 5 ke tabel/path yang salah (typo) supaya request gagal; segera kembalikan ke `policy_evaluations` yang benar setelah test selesai |
+
+Setelah baris #3, pastikan endpoint tulis STEP 5 sudah dikembalikan ke
+`policy_evaluations` yang benar dan hapus fixture clone dari #2
+(`delete from "Compliance_Items" where item_id = <id clone>`) sebelum
+melanjutkan ke test/stage lain.
 
 ## 3. OP-06 — First-Payroll Verification
 
@@ -906,8 +939,8 @@ is not evidence.
 | G-03 | Command Center | Publish manager action-state contract | Supply Auto needs | Implement contract | Backend | Done | Passed (unit + clean-install SQL smoke) | Latest additive schema was applied to live Supabase; user-confirmed |
 | UI | Command Center | Policy Studio, Workbench, Dashboard, Data Manager | Build/live-test | Publish APIs | G-01/G-02/G-03 contracts | Done | Production build and local Keycloak provider passed | All user-facing copy is English; protected pages redirect to sign-in |
 | 5.1 | OP-05 | Context/policy/timezone | Build | Fixture support | G-01 | Saved | Partial | Valid-employee test completed end-to-end; `EMP-NOT-FOUND` safely returns a system exception but currently receives Supabase REST 401 instead of `WORKER_NOT_FOUND`. |
-| 5.2 | OP-05 | Compliance/work-auth rules + logs | Build/test | Verify persisted log | 5.1 | Not started | Not started | |
-| 5.3 | OP-05 | Partial failure behavior | Build/test | Verify safe API result | 5.2 | Not started | Not started | |
+| 5.2 | OP-05 | Compliance/work-auth rules + logs | Build/test | Verify persisted log | 5.1 | Saved | Partial | `EMP7054` completed with the expected compliance legal-breach finding after jurisdiction-threshold parsing was corrected; remaining rule, persistence, and idempotency tests pending. |
+| 5.3 | OP-05 | Partial failure behavior | Build/test | Verify safe API result | 5.2 | Done | Passed (3/3) | All 3 tests passed: stop-on-read-failure (`EMP-NOT-FOUND`), item-level isolation (`EMP7032` + malformed clone), and write-retry-then-integration-failure. Fixed a state-propagation bug in `evaluate_compliance_context` — `worker_found`/`policy_version_id`/`as_of_local_date` were never written to `workflow_step_state`, only passed locally to `display_results()`, causing downstream to always see the upstream context as missing. |
 | 6.1 | OP-06 | Restricted context/read | Build/test | Privacy review | G-01 | Saved | Not started | Initial context/read workflow saved; privacy and fixture tests pending. |
 | 6.2 | OP-06 | Payroll rules + logs | Build/test | Verify persisted log | 6.1 | Not started | Not started | |
 | 6.3 | OP-06/OP-04 | Restricted payroll case route | Build after gate | Prove G-02 | G-02, 6.2 | Ready after 6.2 | Not started | G-02 is satisfied; do not bypass the restricted route |
