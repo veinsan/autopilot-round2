@@ -454,11 +454,14 @@ policy_version_id, and evaluation timestamps. No compensation values.
 
 **Tests:**
 
-| Scenario | Expected |
-|---|---|
-| `EMP7062`, `as_of=2026-08-03` | Reads `PAY-40063` with status Error; output contains none of the source's raw error text or compensation fields. |
-| `EMP7008`, same as-of | Reads Paid safely. |
-| Forced REST response containing sentinel `PAYROLL_SECRET_XYZ` in `error_reason` | Sentinel never appears in Operator variables, output, Activity Timeline, or events because the field was not selected. |
+Field yang sama di semua baris: `command_id` = sama dengan `execution_id`;
+`trigger_source` = `command_center`; pin `as_of_date="2026-08-03"`.
+
+| Urutan | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan sebelum run |
+|---|---|---|---|---|---|
+| 1 | Baca status Error (tanpa bocor detail) | `EMP7062` | `cmd_a3408d6c818e7e633873fab74c2b3b2d` | Output berisi `PAY-40063`, status `Error`, `cutoff_date=2026-06-26` (Hire_Date `2026-05-27` + 30 hari); tidak ada `error_reason`, `gross`, atau `net` di manapun (variabel, output, Activity Timeline) | Tidak ada |
+| 2 | Baca status Paid | `EMP7008` | `cmd_0d84b4010c4fb7be79e79ccd220fb5ca` | Output berisi `PAY-40009`, status `Paid`, `cutoff_date=2026-07-25` (Hire_Date `2026-06-25` + 30 hari) | Tidak ada |
+| 3 | Sentinel tidak boleh bocor | `EMP7062` | `cmd_aab69ff2ad9ad591b4c7732ef5eb3d23` | Output tetap seperti test #1; string `PAYROLL_SECRET_XYZ` **tidak muncul** di variabel Operator, output, Activity Timeline, atau `workflow_events` — buktikan `error_reason` memang tidak pernah di-select | Sebelum run: `update "Payroll_Records" set error_reason = 'PAYROLL_SECRET_XYZ - temporary test marker' where payroll_id = 'PAY-40063';`. Setelah run, kembalikan: `update "Payroll_Records" set error_reason = 'Bank account validation failed; first salary not disbursed' where payroll_id = 'PAY-40063';` |
 
 ### 6.2 — Deterministic payroll outcomes and evaluation log
 
@@ -490,15 +493,29 @@ recommended action is "Route to the restricted payroll reviewer".
 
 **Tests:**
 
-| # | Scenario | Input/setup | Expected |
-|---|---|---|---|
-| 1 | Confirmed Error | `EMP7062`, `PAY-40063` | `PAYROLL_ERROR_DETECTED`; no raw reason/amount. |
-| 2 | Pending after cutoff | `EMP7001`, MY cutoff ending before `2026-08-03` | `PAYROLL_NOT_CONFIRMED`. |
-| 3 | Pending before cutoff | `EMP7045`, cycle `2026-09`, `as_of=2026-08-03` with applicable cutoff not passed | CLEAR. |
-| 4 | Paid | `EMP7008` | CLEAR. |
-| 5 | Missing after cutoff | Controlled worker fixture with no payroll row and passed cutoff | `PAYROLL_RECORD_MISSING`. This condition does not exist naturally in the supplied CSV. |
-| 6 | Missing before cutoff | Same fixture before cutoff | CLEAR. |
-| 7 | Policy change | Same pending fixture under two active cutoff versions | Outcome changes only when cutoff boundary changes; both versions logged. |
+Field yang sama di semua baris: `command_id` = sama dengan `execution_id`;
+`trigger_source` = `command_center`. `first_payroll_cutoff_days` aktif = 30
+(default, tanpa override jurisdiksi) kecuali disebutkan lain.
+
+| Urutan | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan sebelum run |
+|---|---|---|---|---|---|
+| 1 | Error → critical, abaikan cutoff | `EMP7062` | `cmd_9f1e81e4a8e8d174cfb1b8992931d5b5` | `PAYROLL_ERROR_DETECTED`, severity critical, domain payroll; evidence `payroll:PAY-40063`; tidak ada `error_reason`/`gross`/`net` di mana pun | Pin `as_of_date="2026-08-03"` |
+| 2 | Pending, cutoff sudah lewat | `EMP7001` | `cmd_42932cbe315059e061d324a13f7b4358` | `PAYROLL_NOT_CONFIRMED`, severity high; cutoff `2026-07-16` (Hire `2026-06-16`+30), `as_of=2026-08-03` sudah lewat cutoff | Pin `as_of_date="2026-08-03"` |
+| 3 | Pending, cutoff belum lewat | `EMP7045` | `cmd_e8ac6bd34ab175c8e8819a8e38330ddd` | CLEAR; cutoff `2026-09-01` (Hire `2026-08-02`+30) belum lewat pada `as_of=2026-08-03` | Pin `as_of_date="2026-08-03"` |
+| 4 | Paid → selalu CLEAR | `EMP7008` | `cmd_d3ba5c7e742bb034d40d17a8569a4b30` | CLEAR; cutoff `2026-07-25` (Hire `2026-06-25`+30) diabaikan karena status Paid | Pin `as_of_date="2026-08-03"` |
+| 5 | Tidak ada payroll row, cutoff sudah lewat | `EMP7000` | `cmd_784fbccb23c413463577522c3640089c` | `PAYROLL_RECORD_MISSING`, severity high; evidence hanya `worker:EMP7000`; cutoff `2026-06-25` (Hire `2026-05-26`+30) sudah lewat pada `as_of=2026-08-03` | Pin `as_of_date="2026-08-03"`. Hapus sementara payroll row: `delete from "Payroll_Records" where payroll_id='PAY-40001';` |
+| 6 | Tidak ada payroll row, cutoff belum lewat | `EMP7000` (fixture sama, payroll row masih dihapus) | `cmd_35bc9e9baf3b3df9f7799120cd34f3fb` | CLEAR; cutoff `2026-06-25` belum lewat pada `as_of` yang dipin | Pin `as_of_date="2026-06-01"` (payroll row `EMP7000` tetap dihapus dari test #5) |
+| 7a | Perubahan policy — versi cutoff lama | `EMP7001` | `cmd_b4156fabb39b28ea9d483eb59c927b61` | `PAYROLL_NOT_CONFIRMED` (sama seperti #2); baris `policy_evaluations` mencatat `policy_version_id` aktif saat ini | Pin `as_of_date="2026-08-03"`; jalankan dengan `policy_round2_v1` (cutoff default 30) masih aktif |
+| 7b | Perubahan policy — versi cutoff baru | `EMP7001` | `cmd_78857487ca8a618f72d4c6ca950c7a68` | CLEAR; cutoff baru `2026-08-15` (Hire `2026-06-16`+60) belum lewat pada `as_of=2026-08-03` — buktikan hasil berubah murni karena versi policy, bukan karena data worker/payroll berubah | Buat draft policy baru via Policy Studio dengan `first_payroll_cutoff_days.default=60`, simulate → approve → activate (menggantikan `policy_round2_v1` sebagai active); setelah test, kembalikan `policy_round2_v1` sebagai active |
+
+Setelah baris #7b, pastikan `policy_round2_v1` (cutoff 30) sudah diaktifkan
+kembali dan payroll row `EMP7000` sudah dipulihkan sebelum lanjut ke stage
+lain:
+
+```sql
+insert into "Payroll_Records" (payroll_id, employee_id, cycle, gross, net, status, error_reason)
+values ('PAY-40001', 'EMP7000', '2026-06', 6000, 4693.53, 'Paid', null);
+```
 
 ### 6.3 — Restricted case routing (G-02 required)
 
