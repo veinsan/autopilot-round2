@@ -766,13 +766,51 @@ Continue the current saved Operator. Do not create a replacement workflow.
    decision. Never fall back silently to legacy policy_config.
 ```
 
-**Regression tests:** OP-01 still passes its five saved intake cases and its
-Typeform polling parent still fans out one submission at a time; OP-02 still
-returns its four registered Round 1 reason codes on the original fixtures;
-OP-03 still passes the low-score and confidential-disclosure fixtures, including
-the literal sentinel leak test. For one safe fixture per Operator, change an
-applicable threshold through an approved active version and prove the outcome
-and logged policy version change together.
+**Regression tests:**
+
+Catatan: OP-01/02/03 ini migrasi dari Operator Round 1 yang sudah pernah lolos
+(lihat `docs/STAGE_SUMMARY.MD` §4). Kalau kamu masih punya submission
+Typeform asli dari 5 kasus OP-01 Round 1, pakai itu langsung — 5 kasus OP-01
+di bawah adalah rekonstruksi berdasarkan kategori yang terdokumentasi
+(`docs/STAGE_SUMMARY.MD`), bukan payload asli. OP-02/OP-03 memakai
+`employee_id` asli yang sudah pernah diverifikasi live di Round 1, jadi itu
+tetap akurat.
+
+**OP-01 — Intake & Normalization** (`trigger_source=typeform`, satu submission
+per call lewat `OP-01 Typeform Intake Poller`; tidak ada `execution_id`
+manual karena dipicu poller, bukan Command Center):
+
+| # | Kategori | Field submission | Expected output | Tindakan tambahan |
+|---|---|---|---|---|
+| 1 | Clean create | `Legal_Name="Farah Kassim"`, `Hire_Date="2026-08-10"`, manager=`Anjali Prakash` (cocok `Manager_Directory` WID `7f350fac-...`) | Row baru di `Workers`, `policy_version_id` terisi di output | Tidak ada |
+| 2 | Name-variant update | Submission kedua untuk pekerja yang sama, `Legal_Name="Farah Kasim"` (typo minor) + `Hire_Date` sama ±0 hari | Fuzzy-dedup skor ≥0.90 → **update** row #1, bukan row baru | Jalankan setelah #1 |
+| 3 | Unparseable date | `Hire_Date="segera"` (tidak match format apa pun) | `intake_validation` system_exception; tidak menebak tanggal | Tidak ada |
+| 4 | Unresolvable manager | Manager identifier yang tidak ada di `Manager_Directory` (mis. `"Manager XYZ"`) | `intake_validation` system_exception (0 kandidat) | Tidak ada |
+| 5 | Missing required field | `Hire_Date` kosong, field lain lengkap | `intake_validation` system_exception (salah satu dari 3 field wajib hilang) | Tidak ada |
+
+Plus 1 tes ambang policy: submission dengan skor dedup di pita 0.70–0.90
+(name jauh lebih berbeda dari #2 tapi tetap mirip) terhadap kandidat dari #1 →
+`intake_possible_duplicate` (bukan auto-update, bukan auto-create).
+
+**OP-02 — Onboarding & Provisioning Risk** (`employee_id`, `execution_id`
+manual via Command Center test form, pin `as_of_date` sesuai kolom):
+
+| # | Scenario | employee_id | as_of_date | Expected output |
+|---|---|---|---|---|
+| 1 | 3 dari 4 reason code sekaligus | `EMP7000` | `2026-08-03` | `MISSING_DAY_ONE_ACCESS` (Laptop+System Access `Blocked`), `PROVISIONING_DELAYED` (Email `Requested` sejak `2026-07-13`), `TASK_ALREADY_ESCALATED` (2×, `BP-90007`/`BP-90009`); tier HIGH; `policy_version_id` + `evaluated_at` di output; baris `policy_evaluations` tertulis per reason code |
+| 2 | Reason code ke-4 | `EMP7005` | `2026-08-03` | `STALLED_COMPLIANCE_DOC` ("Compliance Document signed", jatuh tempo `2026-05-23`, jauh lewat `task_stalled_overdue_days=3`); `TASK_ALREADY_ESCALATED` (`BP-90073`) |
+| 3 | Clean/LOW (belum pernah dites) | `EMP7012` | `2026-07-20` (sebelum compliance step-nya jatuh tempo `2026-07-21`, supaya belum overdue) | `data_state` normal, 0 reason code, tier LOW; baris `policy_evaluations` tetap tertulis dengan outcome CLEAR |
+| 4 | Ambang policy berubah | `EMP7005` | `2026-08-03` | Sama seperti #2 tapi `STALLED_COMPLIANCE_DOC` **hilang** karena `task_stalled_overdue_days` dinaikkan; `TASK_ALREADY_ESCALATED` tetap muncul (tidak terkait threshold ini) — buktikan hasil + `policy_version_id` berubah bersamaan | Buat draft policy baru dengan `task_stalled_overdue_days=100`, simulate → approve → activate; setelah test, kembalikan `policy_round2_v1` sebagai active |
+
+**OP-03 — Engagement & Disclosure** (`employee_id`, `execution_id` manual):
+
+| # | Scenario | employee_id | Expected output | Tindakan tambahan |
+|---|---|---|---|---|
+| 1 | Low engagement (skor terbaru) | `EMP7046` | `LOW_ENGAGEMENT_SCORE` (skor Day 60 = 3, `<5`) | Tidak ada |
+| 2 | Negatif — sudah pulih | `EMP7007` | **Tidak** fire (skor Day 7 = 2 tapi Day 30 = 10 adalah yang terbaru; rule baca skor terbaru, bukan skor terendah) | Tidak ada |
+| 3 | Confidential disclosure asli | `EMP7003` | `confidential=true`, confidence tinggi; `reasons[]` hanya berisi `SENSITIVE_DISCLOSURE_DETECTED` generik; teks komentar asli **hanya** ada di `_internal_case_payload`, tidak pernah di `reasons[]`/log/output standar | Tidak ada |
+| 4 | Sentinel leak test | `EMP7003` | Sama seperti #3, tapi string `SENTINEL_HEALTH_XYZ` **tidak muncul** di `reasons[]`, output standar, event, atau log mana pun — hanya boleh ada (kalau ada) di `_internal_case_payload` yang restricted | Sebelum run: `update "Peakon_Engagement" set "Comment"='...dealing with SENTINEL_HEALTH_XYZ and have not felt able to raise it...' where "Response_ID"='PK-5006';`. Setelah run, kembalikan ke komentar asli |
+| 5 | Ambang policy berubah | `EMP7046` | `LOW_ENGAGEMENT_SCORE` **hilang** (skor 3 tidak lagi `<2`) — buktikan hasil + `policy_version_id` berubah bersamaan | Buat draft policy baru dengan `engagement_low_score=2`, simulate → approve → activate; setelah test, kembalikan `policy_round2_v1` sebagai active |
 
 ## 6. OP-04 — Round 2 routing amendments
 
@@ -826,10 +864,43 @@ Supabase write uses the active retry/demo profile. Integration failure creates a
 safe operational exception; it does not silently change the business outcome.
 ```
 
-**Tests:** each new known code reaches only its allowed route; repeating the same
-employee/jurisdiction blockers updates one case; an unknown code sends no Slack;
-payroll never reaches manager; a resolved recurring compliance risk reopens the
-same case; clear evaluation does not auto-close it.
+**Tests:**
+
+Catatan: OP-04 dipanggil ORCH-01, jadi INPUT contract persisnya (bentuk array
+`findings`) tergantung bagaimana Auto membangun kontrak itu. Tabel di bawah
+menganggap OP-04 bisa dites langsung lewat form test Auto dengan payload
+`{execution_id, employee_id, findings: [{reason_code, evidence_refs}], ...}`
+— sesuaikan field persis begitu prompt ini benar-benar di-paste. Untuk
+`WORK_AUTH_EXPIRY_AT_RISK`/`WORK_AUTH_EXPIRED` **tidak ada** worker di dataset
+yang jatuh tempo dekat `as_of=2026-08-03` (yang paling dekat adalah `2027-01-01`),
+jadi dua baris itu pakai `reason_code` yang disuntik langsung ke payload test
+(bukan hasil evaluasi OP-05 asli) — cukup untuk membuktikan **routing** OP-04,
+karena logika deteksi work-auth sendiri sudah diverifikasi terpisah di §5.2.
+
+| # | Reason code | employee_id / cohort | execution_id | Expected route | Tindakan tambahan |
+|---|---|---|---|---|---|
+| 1 | `COMPLIANCE_DEADLINE_AT_RISK` | `EMP7032` | `cmd_e3183f42821a9b1b28489e53a073976a` | People Ops compliance Workbench; **tidak ada** Slack manager | Tidak ada (temuan asli dari §5.2 test #1) |
+| 2 | `COMPLIANCE_LEGAL_BREACH` | `EMP7054` | `cmd_a560cfae1aff0407a3faddd2824069a9` | People Ops compliance Workbench; tidak ada Slack manager | Tidak ada (temuan asli dari §5.2 test #4/#5) |
+| 3 | `WORK_AUTH_EXPIRY_AT_RISK` | `EMP7099` | `cmd_40097a5eb1178218bf410e2b2efef1cf` | People Ops compliance Workbench; tidak ada Slack manager | Suntik `reason_code` ini langsung di payload test (lihat catatan di atas) |
+| 4 | `WORK_AUTH_EXPIRED` | `EMP7099` | `cmd_db0b0fd777760ac844b8812401c4553c` | People Ops compliance Workbench; tidak ada Slack manager | Suntik `reason_code` ini langsung di payload test |
+| 5 | `PAYROLL_ERROR_DETECTED` | `EMP7062` | `cmd_fa5494b1683e2a6f58bcf24cfef5eff5` | Restricted People Ops/payroll Workbench saja; **tidak pernah** manager Slack | Tidak ada (temuan asli dari §6.2 test #1, case dari §6.3 test #1) |
+| 6 | `PAYROLL_NOT_CONFIRMED` | `EMP7001` | `cmd_a1dd0114f2aab31621c890203bfd5326` | Restricted payroll Workbench saja | Tidak ada |
+| 7 | `PAYROLL_RECORD_MISSING` | `EMP7000` | `cmd_487678fed9541aa53fb27d35dc4b9fa5` | Restricted payroll Workbench saja | Tidak ada (pastikan payroll row `EMP7000` masih dihapus seperti fixture §6.2/6.3) |
+| 8 | `DAY_ONE_DEPENDENCY_BLOCKED` | `EMP7063` | `cmd_67a47839096127635676320198126b06` | Standard Day-1 Workbench + route dependency owner (team `Security`/`IT`/dst.) | Tidak ada (temuan asli dari §7.1 test #1) |
+| 9 | `LEARNING_MILESTONE_OVERDUE` | `EMP7101` | `cmd_3b715fd0ae465c094f7b97cc410980de` | Standard manager-to-People-Ops route | Tidak ada (temuan asli dari §7.1 test #2) |
+| 10 | `MANAGER_ACKNOWLEDGMENT_OVERDUE` | `EMP7009` | `cmd_b00c9ceaf53c66a922b856c73e87dde6` | People Ops accountability escalation; **bukan** nudge lagi ke manager yang sama | Reuse fixture `CASE-73-01` dari §7.3 test #1 |
+| 11 | `MANAGER_ACTION_OVERDUE` | `EMP7011` | `cmd_d0bb13f5db9d19bce7131d6a82e2ac5e` | People Ops accountability escalation | Reuse fixture `CASE-73-03` dari §7.3 test #3 |
+| 12 | `COHORT_DEPENDENCY_BOTTLENECK` | `COH-2026-W22` (scope=cohort) | `cmd_3ea7e95d067ca86644f5d540f3550d1f` | Cohort insight/audit **saja** — pastikan **tidak ada** satu pun case per-employee dibuat | Tidak ada (temuan asli dari §7.2 test #1) |
+| 13 | Kode tidak dikenal | `EMP7008` + `reason_code="XYZ_UNREGISTERED_CODE"` | `cmd_a5d7218d44074f51eb4dcced95ea4531` | Satu `system_exception` ke Workbench; **tidak ada** Slack terkirim sama sekali | Suntik reason_code palsu ini di payload test |
+| 14 | Run berulang → update case yang sama | `EMP7032` (ulangi #1) | `cmd_b1c1fe2e0c443e8571e5ce2772b2eeef` | Masih satu case per employee+jurisdiction (bukan duplikat); evidence_refs gabungan | Jalankan langsung setelah #1 |
+| 15 | Reopen setelah resolusi manusia | `EMP7063` (ulangi #8 setelah resolve manual) | `cmd_1fdaf108db4d4aa79f2f1a85607ae1c8` | Case Day-1 `EMP7063` yang tadinya di-resolve kembali `open` | Sebelum run: resolve case `EMP7063` lewat `record_case_action(..., 'resolve', ...)` atau langsung `update "workbench_cases" set status='resolved', resolved_at=now() where ...` |
+| 16 | CLEAR tidak auto-close | `EMP7063` | `cmd_963a89cff43687e7d012aeeb014ce8ef` | Case `EMP7063` **tetap** seperti kondisi test #15 (tidak otomatis resolved) meski sekarang hasil evaluasi CLEAR | Pastikan dependency blocker `EMP7063` sudah di-set jadi Done semua di `Cross_Team_Dependencies` supaya hasil CLEAR; jangan resolve manual |
+
+Setelah selesai, kembalikan semua fixture ke kondisi awal: payroll row
+`EMP7000`, dependency status `EMP7063`, dan status case yang sempat
+di-resolve manual untuk test #15.
+
+### 4.R2.2 — Confidential independence regression
 
 ### 4.R2.2 — Confidential independence regression
 
@@ -848,10 +919,11 @@ milestone, and secure case link/reference. Standard branches may contain only
 their own safe findings and may not read internal_case_payload.
 ```
 
-**Tests:** send a combined input containing `SENTINEL_SECRET_HEALTH_XYZ` plus a
-Day-1 blocker. Expect one confidential route and one standard Day-1 route; the
-sentinel is absent from all standard cases/messages/events and absent from the
-confidential alert text itself.
+**Tests:**
+
+| Scenario | employee_id | execution_id | Expected output | Tindakan tambahan |
+|---|---|---|---|---|
+| Sinyal confidential + Day-1 blocker bersamaan, satu employee | `EMP7003` | `cmd_38087d41abb0755e83842a0e39d71233` | Dua route independen: (1) confidential case/message — hanya berisi `employee_id`, `milestone`, secure case link; (2) standard Day-1 Workbench case untuk `DEP-10015`. Route Day-1 **tidak boleh tersuppress** oleh sinyal confidential. String `SENTINEL_SECRET_HEALTH_XYZ` **tidak muncul** di case/message standar mana pun, event mana pun, **maupun** di teks alert confidential itu sendiri (confidential message cuma boleh `employee_id`/`milestone`/link, bukan comment_text mentah) | Sebelum run: (1) `update "Peakon_Engagement" set "Comment"='...dealing with SENTINEL_SECRET_HEALTH_XYZ and have not felt able to raise it...' where "Response_ID"='PK-5006';` (2) `update "Cross_Team_Dependencies" set status='In Progress' where dep_id='DEP-10015';` supaya jadi blocker Day-1 yang nyata. Setelah run, kembalikan komentar `PK-5006` dan status `DEP-10015` ke `Done` |
 
 ## 7. ORCH-01 — Round 2 orchestration
 
@@ -894,13 +966,16 @@ case/notification writer.
 
 **Tests:**
 
-| # | Scenario | Expected |
-|---|---|---|
-| 1 | Multi-domain employee (`EMP7032`) | OP-05 and OP-06 results both survive merge; routes remain separate. |
-| 2 | One branch fails | Other valid branches still produce cases; failed branch becomes system exception. |
-| 3 | Duplicate finding delivery | One merged finding and one idempotent case. |
-| 4 | Unknown reason code | No action except system exception. |
-| 5 | Confidential + standard | Both independent routes execute; no sensitive cross-branch data. |
+Field yang sama: `scope=employee`; `command_id` = sama dengan `execution_id`;
+`trigger_source=command_center`; pin `as_of_date="2026-08-03"`.
+
+| # | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan |
+|---|---|---|---|---|---|
+| 1 | Multi-domain, dua Operator sekaligus | `EMP7032` | `cmd_685e727f698af6056739c1cb0d3493f2` | Hasil OP-05 (`COMPLIANCE_DEADLINE_AT_RISK`) **dan** OP-06 (tergantung status payroll `EMP7032` saat ini) sama-sama selamat di merge; masing-masing route ke case terpisah (compliance vs payroll), tidak tercampur | Tidak ada |
+| 2 | Satu branch gagal, yang lain tetap jalan | `EMP7032` | `cmd_cc2392e2c28db7cb5245cefe620c97be` | Temuan OP-05 tetap ada dan ter-route normal; branch OP-06 yang gagal muncul sebagai satu `system_exception` terpisah, **tidak** menghapus temuan OP-05 | Cabut sementara hak tulis/baca OP-06 (mis. `revoke select on "Payroll_Records" from service_role;`), jalankan, lalu kembalikan (`grant select ...`) |
+| 3 | Duplicate finding delivery (retry execution_id sama) | `EMP7032` | `cmd_685e727f698af6056739c1cb0d3493f2` (**sama persis** dengan #1) | Satu finding gabungan, satu case idempotent — tidak ada duplikat di `workbench_cases`/`policy_evaluations` | Jalankan langsung setelah #1, tanpa ubah data |
+| 4 | Reason code tidak dikenal dari salah satu branch | `EMP7008` | `cmd_75a27d34818030aef4d5ac5b329959e5` | Tidak ada case/Slack apa pun untuk kode ini — hanya satu `system_exception`; branch lain untuk `EMP7008` (kalau ada) tetap jalan normal | Suntik `reason_code="XYZ_UNREGISTERED_CODE"` di salah satu finding upstream test, sama seperti §6 4.R2.1 test #13 |
+| 5 | Confidential + standard bersamaan | `EMP7003` | `cmd_10fbb44d3d8a71e412e869c3cc3e2ab0` | Dua route independen jalan (confidential + Day-1 standar); tidak ada data sensitif nyeberang ke branch standar | Fixture sama seperti §6 4.R2.2: update `Comment` `PK-5006` + `Cross_Team_Dependencies.DEP-10015` jadi `In Progress`; revert setelah test |
 
 ### O.2 — Command event correlation
 
@@ -923,9 +998,16 @@ Continue ORCH-01.
   as execution_id so the FastAPI reconciler can discover and correlate the run.
 ```
 
-**Tests:** raw Activity Timeline and Supabase show stable correlation; replaying a
-source event does not add a second event; SSE reconnect resumes after the last
-monotonic sequence; terminal state is emitted once.
+**Tests:**
+
+| # | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan |
+|---|---|---|---|---|---|
+| 1 | Korelasi Command Center run | `EMP7032` | `cmd_16fc077348809fd328f874daf71be609` | Query `command_runs` dan `workflow_events` untuk `command_id`/`execution_id` ini: nilainya **identik**; urutan event `queued -> running -> completed` konsisten dengan Activity Timeline Auto | Jalankan lewat Command Center (bukan test form Auto langsung) supaya `command_id` benar-benar berasal dari `app/services/hr.py` |
+| 2 | Replay source_event_id sama | `EMP7032` | `cmd_16fc077348809fd328f874daf71be609` (**sama persis** dengan #1) | `select count(*) from "workflow_events" where execution_id=...;` jumlahnya **tidak bertambah** dibanding setelah #1 — replay tidak menambah event baru | Jalankan ulang langsung setelah #1 dengan input identik |
+| 3 | Reconnect SSE di tengah run | `EMP7062` (payroll, biar durasinya cukup lama untuk sempat disconnect) | `cmd_f0bbcaa278c91ecbdf908f654291825f` | Setelah reconnect ke stream SSE Command Center, event yang diterima lanjut dari nomor urut terakhir yang sudah diterima sebelum disconnect — tidak mengulang dari awal, tidak ada gap | Manual: buka halaman yang subscribe SSE, matikan koneksi jaringan sebentar di tengah run, nyalakan lagi |
+| 4 | Terminal state sekali walau sempat retry | `EMP7062` | `cmd_1ba458fa9c0d32d490bd2314b138d303` | Tepat satu event terminal (`completed`/`failed`/`cancelled`) di `workflow_events` untuk `execution_id` ini, walau salah satu Operator sempat retry beberapa kali sebelum akhirnya berhasil/gagal | Sebelum run, buat salah satu branch (mis. OP-06) gagal sekali lalu berhasil di percobaan retry berikutnya — gunakan teknik toggle env var yang sama seperti §5.3 test #3 |
+| 5 | Run terjadwal tanpa command_id | — (`trigger_source=daily_schedule`) | Tidak ada `execution_id` manual; pakai Auto run ID otomatis | `command_runs`/`workflow_events` tetap punya baris yang bisa dikorelasikan lewat Auto run ID; endpoint `POST /runs/reconcile` di Command Center bisa menemukan run ini | Trigger manual test run dari Daily Cohort Sweep (§8), bukan dari Command Center |
+| 6 | Cancellation mencegah aksi lanjutan | `EMP7062` | `cmd_ab53176b83db40ac5da36561c1bcbe52` | Setelah `cancel_requested_at` di-set, tidak ada case/notification baru yang tertulis untuk branch yang belum sempat jalan; event terminal `cancelled` tertulis sekali | Mulai run, lalu segera panggil `POST /runs/{command_id}/cancel` sebelum branch OP-06/OP-07 sempat selesai |
 
 ## 8. Daily cohort sweep parent workflow
 
@@ -961,27 +1043,45 @@ TRIGGER: every day at 09:00 UTC. Also allow an explicit manual test trigger.
 7. Record a discoverable safe run/event trail using the stable Auto run ID.
 ```
 
-**Tests:** manual run uses one shared as_of; pagination includes all eligible
-workers; one failed child retry does not duplicate cases; `COH-2026-W22` produces
-the seeded Security 14/19 bottleneck under permissive thresholds; demo_mode
-fails fast; scheduled run is later visible through FastAPI reconciliation.
+**Tests:**
+
+Semua baris pakai manual test trigger (bukan menunggu jadwal 09:00 UTC), pin
+`as_of_date="2026-08-03"` di policy aktif kecuali disebutkan lain.
+
+| # | Scenario | execution_id (parent) | Expected output | Tindakan tambahan |
+|---|---|---|---|---|
+| 1 | Satu as_of dibagi ke semua child | `cmd_335320ee0b5f69de171b83e0235d26ec` | Semua invocation ORCH-01 anak (lintas jurisdiksi MY/SG/AU/IN/PH) memakai `as_of_local_date` yang konsisten dengan satu instant yang sama (hasil resolve timezone masing-masing boleh beda tanggal lokal, tapi instant UTC sumbernya sama) | Tidak ada |
+| 2 | Paginasi mencakup semua worker eligible | `cmd_cf427fbee9d1700f09762e7bf5b1f6ac` | Jumlah worker yang diproses (Day 0–90 di `as_of`) sama antara run dengan limit kecil vs limit default — bandingkan `eligible` count di output terhadap hitungan manual `select count(*) from "Workers" where "Hire_Date" between (as_of - interval '90 days') and as_of;` (sesuaikan filter cohort/Day-90 persis definisi prompt) | Sebelum run, kecilkan sementara page size REST `Workers` di step baca (mis. `limit=10`) lalu kembalikan setelah test |
+| 3 | Retry 1 child gagal, tidak duplikat case | `cmd_a98f23b27af5974d22b4592d8c0e61c1` | Employee yang child-nya sempat gagal tetap punya **tepat satu** case/finding setelah retry berhasil — bukan dua | Buat satu employee (mis. `EMP7032`) gagal di percobaan pertama (toggle env var sama seperti §5.3 test #3), berhasil di retry berikutnya |
+| 4 | Bottleneck cohort end-to-end | `cmd_dd5468435b72bb1356cd9620685bd399` | `COH-2026-W22` tetap menghasilkan `COHORT_DEPENDENCY_BOTTLENECK` Security 14/19 (~73.7%) melalui pipeline penuh (bukan cuma OP-07 langsung seperti §7.2 test #1) — buktikan hand-off employee-fan-out → OP-07 scope=cohort bekerja end-to-end | Tidak ada (policy default, sama seperti §7.2 test #1) |
+| 5 | `demo_mode` gagal cepat | `cmd_84e8a4eb3c0381ce6c898c38d053c4af` | Satu child yang gagal langsung jadi `system_exception` **tanpa** backoff 5/20/60s (retry_demo_profile: `max_attempts=1`, tanpa backoff) — total waktu gagal jauh lebih cepat dibanding test #3 | Buat draft policy baru dengan `demo_mode=true`, simulate → approve → activate; buat satu child gagal (toggle yang sama seperti test #3); setelah test, kembalikan `policy_round2_v1` (`demo_mode=false`) sebagai active |
+| 6 | Run terjadwal kelihatan lewat reconciliation | `cmd_9352c5679f2cf296ea88f5c99963fb4e` | Parent run ini muncul dan bisa dikorelasikan lewat `POST /runs/reconcile` di Command Center walau tidak dipicu dari Command Center | Trigger via manual test trigger di parent workflow (bukan tombol run di Command Center) |
+
+Setelah test #2, #3, dan #5, kembalikan semua toggle/policy ke kondisi normal
+(`policy_round2_v1` aktif, `demo_mode=false`, page size default) sebelum
+lanjut ke stage lain.
 
 ## 9. End-to-end acceptance suite
 
 Do not mark the build complete until these are captured from live Auto Activity
 Timeline plus Supabase/API evidence.
 
-| Gate | Required proof |
-|---|---|
-| Architecture | One Orchestrator calls at least five distinct Operators; Round 2 branches run in parallel; scheduled and stateful behavior are visible. |
-| Live data | Operators read Supabase via custom REST, never CSV/Airtable/native DB blocks. |
-| Policy | At least three editable active policies measurably change outcomes; every evaluation records policy version and as_of. |
-| Workbench | A real exception is created, claimed/acknowledged, and human-resolved; recurring risk reopens rather than duplicates. |
-| Integrations | Supabase REST plus native Slack and native Typeform polling are live (three integrations across source/channel categories). |
-| Privacy | Confidential sentinel and payroll sentinel are absent from dashboard, standard queue, events, logs, client responses, and message text. |
-| Idempotency | Retrying the same source/execution IDs does not duplicate evaluations, cases, state transitions, or notifications. |
-| Degraded mode | One Operator/integration failure creates an observable system exception while independent safe branches continue. |
-| Generality | Tests use rule-based logic and several employees/cohorts; no behavior is hard-coded to fixture IDs. |
+Tabel ini bukan test baru — ini checklist bukti mana yang sudah dihasilkan
+oleh test-test di §2–§8, dan mana yang butuh satu langkah tambahan manual.
+Isi kolom terakhir dengan link Activity Timeline run atau query Supabase
+sebagai evidence, bukan centang tanpa bukti.
+
+| Gate | Required proof | Sumber evidence (test yang sudah ada) | Langkah tambahan kalau belum cukup |
+|---|---|---|---|
+| Architecture | Satu Orchestrator manggil ≥5 Operator distinct; branch Round 2 paralel; perilaku terjadwal & stateful kelihatan | ORCH-01 O.1 test #1 (`EMP7032`, timestamp overlap OP-05/OP-06/OP-07 di Activity Timeline); Daily Sweep S.1 test #6 (terjadwal) | Screenshot/link Activity Timeline yang menunjukkan overlap waktu run, bukan cuma klaim selesai |
+| Live data | Operator baca Supabase via custom REST, bukan CSV/Airtable/native DB block | Inspeksi visual step config di Auto Studio untuk tiap Operator (OP-01 s/d OP-07) | Buka tiap step satu-satu, pastikan block-nya "Custom REST"/Code, bukan native Supabase/Airtable block |
+| Policy | ≥3 policy threshold yang bisa diedit benar-benar mengubah hasil terukur; tiap evaluasi mencatat `policy_version_id`+`as_of` | §6.2 test #7a/#7b (`first_payroll_cutoff_days` 30→60); §7.2 test #2/#3 (`bottleneck_min_workers`/`bottleneck_min_percent`); §5 OP-02/OP-03 threshold test (`task_stalled_overdue_days` atau `engagement_low_score`) | Pilih minimal 3 dari yang sudah ada; tidak perlu bikin threshold baru |
+| Workbench | Exception nyata dibuat, di-claim/acknowledge, dan di-resolve manusia; recurring risk reopen bukan duplikat | §6.3 test #1 (create) + §OP-04 4.R2.1 test #15 (reopen setelah resolve) | Tambahan manual: buka Command Center Workbench, klik claim → resolve satu case nyata (bukan lewat SQL) untuk bukti UI manusia benar-benar berfungsi |
+| Integrations | Supabase REST + Slack native + Typeform native polling, ketiganya live | §5 OP-01 test (Typeform submission nyata); §6 4.R2.1 test #8/#9 (Slack ke Day-1/manager route); semua test Supabase REST di seluruh guide | Konfirmasi Slack benar-benar terkirim ke channel (bukan cuma tercatat di `Cases_Audit_Log`) untuk minimal satu test |
+| Privacy | Sentinel confidential dan payroll tidak muncul di dashboard/queue standar/event/log/response/pesan | §6.1 test #3 (`PAYROLL_SECRET_XYZ`); §5 OP-03 test #4 (`SENTINEL_HEALTH_XYZ`); §6 4.R2.2 test (`SENTINEL_SECRET_HEALTH_XYZ`) | Tidak ada, tiga ini sudah cukup mewakili payroll + confidential |
+| Idempotency | Retry `execution_id`/source event yang sama tidak menduplikasi evaluasi/case/state/notifikasi | §5.2 test #7 (duplicate delivery OP-05); §6.2 test #4; §7.3 test #5 (duplicate delivery manager event); ORCH-01 O.1 test #3, O.2 test #2 | Tidak ada, sudah cukup lintas 4 layer berbeda (policy_evaluations, workbench_cases, manager_action_states, workflow_events) |
+| Degraded mode | Satu kegagalan Operator/integrasi jadi system_exception yang kelihatan, branch lain tetap jalan | ORCH-01 O.1 test #2; §5.3 test #1–#3; §6.3 test #8 | Tidak ada |
+| Generality | Logika rule-based, dipakai di banyak employee/cohort; tidak ada perilaku yang di-hardcode ke satu fixture ID | Seluruh guide sudah memakai >20 `employee_id` berbeda (`EMP7000`–`EMP7147`) lintas §5–§8 plus `COH-2026-W22` | Tidak ada — kalau reviewer minta bukti tambahan, tunjuk baris-baris test di §2–§8 sebagai daftar |
 
 ## 10. Build status tracker
 
