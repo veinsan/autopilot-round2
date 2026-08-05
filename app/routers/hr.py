@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from ..schemas.hr import (
@@ -17,6 +17,7 @@ from ..schemas.hr import (
     PolicyApprovalRequest,
     PolicyDraftRequest,
     PolicySimulationRequest,
+    PolicyVisibilityRequest,
     RunRequest,
     RunResponse,
 )
@@ -320,16 +321,20 @@ def act_on_confidential_case(
 
 @router.get("/policies")
 def list_policies(
-    user: dict = Depends(get_current_user), hr: HROpsService = Depends(service)
+    include_hidden: bool = Query(
+        False, description="Include versions hidden from the dashboard."
+    ),
+    user: dict = Depends(get_current_user),
+    hr: HROpsService = Depends(service),
 ):
     require_hr_role(user, "admin", "people_ops", "people_ops_confidential")
-    rows = hr.repo.select_all(
-        "policy_versions",
-        {
-            "select": "version_id,status,created_at,created_by,change_summary,snapshot_hash,activated_at,parent_version_id",
-            "order": "created_at.desc",
-        },
-    )
+    params = {
+        "select": "version_id,status,created_at,created_by,change_summary,snapshot_hash,activated_at,parent_version_id,hidden_at,hidden_by",
+        "order": "created_at.desc",
+    }
+    if not include_hidden:
+        params["hidden_at"] = "is.null"
+    rows = hr.repo.select_all("policy_versions", params)
     return {"policies": sanitize(rows)}
 
 
@@ -432,6 +437,42 @@ def delete_policy_draft(
             status_code=409, detail="Only draft policies can be deleted"
         )
     return {"version_id": version_id, "deleted": True}
+
+
+@router.patch("/policies/{version_id}/visibility")
+def set_policy_visibility(
+    version_id: str,
+    request: PolicyVisibilityRequest,
+    user: dict = Depends(get_current_user),
+    hr: HROpsService = Depends(service),
+):
+    """Hide or restore a version in Policy Studio without touching the record.
+
+    The row and its lifecycle history stay in Supabase; only the default
+    dashboard listing is filtered. The active policy always stays visible so the
+    governed baseline can never disappear from the studio.
+    """
+    require_hr_role(user, "admin", "people_ops")
+    rows = hr.repo.select(
+        "policy_versions",
+        {"version_id": f"eq.{version_id}", "select": "version_id,status"},
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Policy version not found")
+    if request.hidden and rows[0].get("status") == "active":
+        raise HTTPException(
+            status_code=409, detail="The active policy version cannot be hidden"
+        )
+    hidden_at = datetime.now(UTC).isoformat() if request.hidden else None
+    hr.repo.patch(
+        "policy_versions",
+        {"version_id": f"eq.{version_id}"},
+        {
+            "hidden_at": hidden_at,
+            "hidden_by": user.get("sub") if request.hidden else None,
+        },
+    )
+    return {"version_id": version_id, "hidden": request.hidden}
 
 
 @router.post("/policies/simulations")

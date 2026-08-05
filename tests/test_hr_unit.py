@@ -23,6 +23,8 @@ from app.routers.hr import (
     get_policy,
     insights as insights_endpoint,
     list_cases,
+    list_policies,
+    set_policy_visibility,
     record_manager_action_event,
     update_policy_draft,
 )
@@ -30,6 +32,7 @@ from app.schemas.hr import (
     CaseActionRequest,
     ManagerActionEventRequest,
     PolicyDraftRequest,
+    PolicyVisibilityRequest,
     RunRequest,
 )
 from app.services.auto import AutoWorkflowClient
@@ -84,6 +87,8 @@ class FakeRepository:
                     for value in expression[4:-1].split(",")
                 }
                 rows = [row for row in rows if str(row.get(key)) in expected]
+            elif expression == "is.null":
+                rows = [row for row in rows if row.get(key) is None]
             elif expression.startswith("neq."):
                 expected = expression[4:]
                 rows = [
@@ -1112,6 +1117,86 @@ def test_policy_draft_can_be_edited_and_deleted_before_simulation() -> None:
     deleted = delete_policy_draft("policy-draft", user=user, hr=hr)
     assert deleted == {"version_id": "policy-draft", "deleted": True}
     assert repo.tables["policy_versions"] == []
+
+
+def _visibility_repo() -> FakeRepository:
+    return FakeRepository(
+        {
+            "policy_versions": [
+                {
+                    "version_id": "policy-active",
+                    "status": "active",
+                    "change_summary": "Active baseline",
+                    "hidden_at": None,
+                },
+                {
+                    "version_id": "policy-retired",
+                    "status": "retired",
+                    "change_summary": "Superseded snapshot",
+                    "hidden_at": None,
+                },
+            ]
+        }
+    )
+
+
+def test_hidden_policy_stays_stored_but_leaves_the_default_dashboard() -> None:
+    repo = _visibility_repo()
+    hr = HROpsService(repo)  # type: ignore[arg-type]
+    user = {"sub": "ops-1", "realm_access": {"roles": ["people_ops"]}}
+
+    result = set_policy_visibility(
+        "policy-retired", PolicyVisibilityRequest(hidden=True), user=user, hr=hr
+    )
+    assert result == {"version_id": "policy-retired", "hidden": True}
+
+    stored = [row for row in repo.tables["policy_versions"] if row["version_id"] == "policy-retired"]
+    assert stored[0]["hidden_at"] is not None
+    assert stored[0]["hidden_by"] == "ops-1"
+
+    visible = list_policies(include_hidden=False, user=user, hr=hr)["policies"]
+    assert [row["version_id"] for row in visible] == ["policy-active"]
+
+    everything = list_policies(include_hidden=True, user=user, hr=hr)["policies"]
+    assert {row["version_id"] for row in everything} == {
+        "policy-active",
+        "policy-retired",
+    }
+
+    set_policy_visibility(
+        "policy-retired", PolicyVisibilityRequest(hidden=False), user=user, hr=hr
+    )
+    restored = list_policies(include_hidden=False, user=user, hr=hr)["policies"]
+    assert {row["version_id"] for row in restored} == {
+        "policy-active",
+        "policy-retired",
+    }
+
+
+def test_active_policy_cannot_be_hidden_from_the_dashboard() -> None:
+    repo = _visibility_repo()
+    hr = HROpsService(repo)  # type: ignore[arg-type]
+    user = {"sub": "admin-1", "realm_access": {"roles": ["admin"]}}
+
+    with pytest.raises(HTTPException) as rejected:
+        set_policy_visibility(
+            "policy-active", PolicyVisibilityRequest(hidden=True), user=user, hr=hr
+        )
+
+    assert rejected.value.status_code == 409
+    assert repo.tables["policy_versions"][0]["hidden_at"] is None
+
+
+def test_policy_visibility_requires_a_governing_role() -> None:
+    hr = HROpsService(_visibility_repo())  # type: ignore[arg-type]
+    user = {"sub": "mgr-1", "realm_access": {"roles": ["manager"]}}
+
+    with pytest.raises(HTTPException) as rejected:
+        set_policy_visibility(
+            "policy-retired", PolicyVisibilityRequest(hidden=True), user=user, hr=hr
+        )
+
+    assert rejected.value.status_code == 403
 
 
 @pytest.mark.parametrize("operation", ["edit", "delete"])

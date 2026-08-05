@@ -80,6 +80,12 @@ class PolicyDraftRequest(StrictModel):
     change_summary: str = Field(min_length=3, max_length=1000)
 
 
+class PolicyVisibilityRequest(StrictModel):
+    """Dashboard-only visibility toggle; the version itself is never removed."""
+
+    hidden: bool
+
+
 class PolicySimulationRequest(StrictModel):
     version_id: str
     cohort: str | None = Field(default=None, max_length=120)

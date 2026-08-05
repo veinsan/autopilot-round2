@@ -18,6 +18,14 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Icons } from '@/components/ui/icons'
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -35,6 +43,8 @@ type Policy = {
   parent_version_id?: string
   created_by?: string
   snapshot_hash?: string
+  hidden_at?: string | null
+  hidden_by?: string | null
 }
 
 type PolicyDetail = Policy & { config_snapshot: Record<string, unknown> }
@@ -178,8 +188,9 @@ export default function PolicyStudioPage() {
   const [detailSnapshot, setDetailSnapshot] = useState('')
   const [detailSummary, setDetailSummary] = useState('')
   const [detailLoading, setDetailLoading] = useState(false)
-  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Policy | null>(null)
   const [draftEditorOpen, setDraftEditorOpen] = useState(false)
+  const [showHidden, setShowHidden] = useState(false)
 
   const fetchPolicy = useCallback(async (policy: Policy) => {
     const response = await apiClient<PolicyDetail>(
@@ -235,7 +246,7 @@ export default function PolicyStudioPage() {
     async (withActiveSnapshot = false) => {
       try {
         const result = await apiClient<{ policies: Policy[] }>(
-          '/api/hr/policies'
+          `/api/hr/policies${showHidden ? '?include_hidden=true' : ''}`
         )
         setPolicies(result.policies)
         if (withActiveSnapshot) {
@@ -253,7 +264,7 @@ export default function PolicyStudioPage() {
         )
       }
     },
-    [loadSnapshot]
+    [loadSnapshot, showHidden]
   )
 
   useEffect(() => {
@@ -450,16 +461,52 @@ export default function PolicyStudioPage() {
     }
   }
 
+  const setVisibility = async (policy: Policy, hidden: boolean) => {
+    setBusy(`visibility:${policy.version_id}`)
+    try {
+      await apiClient(`/api/hr/policies/${policy.version_id}/visibility`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hidden }),
+      })
+      setMessage(
+        hidden
+          ? `${policy.version_id} was hidden from the dashboard. The version stays in the database and in the audit history.`
+          : `${policy.version_id} is visible on the dashboard again.`
+      )
+      await load()
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'The dashboard visibility could not be changed.'
+      )
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const startDraftFromPolicy = async (policy: Policy) => {
+    setBusy(`baseline:${policy.version_id}`)
+    try {
+      await loadSnapshot(policy)
+      setSummary(`Draft derived from ${policy.version_id}`)
+      setDraftEditorOpen(true)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const deleteDraft = async () => {
-    if (!selectedPolicy || selectedPolicy.status !== 'draft') return
-    const deletedVersion = selectedPolicy.version_id
+    if (!deleteTarget || deleteTarget.status !== 'draft') return
+    const deletedVersion = deleteTarget.version_id
     const deletedWasBaseline = baseVersion === deletedVersion
     setBusy(`delete:${deletedVersion}`)
     try {
       await apiClient(`/api/hr/policies/${deletedVersion}`, {
         method: 'DELETE',
       })
-      setDeleteConfirmationOpen(false)
+      setDeleteTarget(null)
       setSelectedPolicy(null)
       if (deletedWasBaseline) {
         setBaseVersion(null)
@@ -529,15 +576,98 @@ export default function PolicyStudioPage() {
 
       <div className='grid gap-6 xl:grid-cols-[1.05fr_.95fr]'>
         <div className='space-y-3'>
-          <h2 className='text-lg font-semibold text-brand-navy'>
-            Version history
-          </h2>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <h2 className='text-lg font-semibold text-brand-navy'>
+              Version history
+            </h2>
+            <Button
+              size='sm'
+              variant='ghost'
+              disabled={busy !== null}
+              onClick={() => setShowHidden((current) => !current)}
+            >
+              {showHidden ? (
+                <Icons.eyeOff className='mr-2 h-4 w-4' />
+              ) : (
+                <Icons.eye className='mr-2 h-4 w-4' />
+              )}
+              {showHidden ? 'Hide hidden versions' : 'Show hidden versions'}
+            </Button>
+          </div>
           {policies.map((policy) => {
             const label = actionLabel(policy)
+            const isHidden = Boolean(policy.hidden_at)
             return (
-              <Card key={policy.version_id}>
+              <Card
+                key={policy.version_id}
+                className={`group relative ${isHidden ? 'opacity-70' : ''}`}
+              >
                 <CardContent className='space-y-4 p-4'>
-                  <PolicyStatusBadge status={policy.status} />
+                  <div className='flex items-start justify-between gap-2'>
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <PolicyStatusBadge status={policy.status} />
+                      {isHidden && (
+                        <span className='inline-flex w-fit items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700'>
+                          <Icons.eyeOff className='h-3 w-3' />
+                          Hidden
+                        </span>
+                      )}
+                    </div>
+                    {canDraft && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type='button'
+                            aria-label={`Policy actions for ${policy.version_id}`}
+                            disabled={busy !== null}
+                            className='rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-slate-100 hover:text-brand-navy focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cornflower/50 disabled:pointer-events-none group-hover:opacity-100 data-[state=open]:opacity-100'
+                          >
+                            <Icons.moreVertical className='h-4 w-4' />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align='end' className='w-60'>
+                          <DropdownMenuItem
+                            onSelect={() => void openPolicyDetails(policy)}
+                          >
+                            <Icons.eye className='mr-2 h-4 w-4' />
+                            View details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => void startDraftFromPolicy(policy)}
+                          >
+                            <Icons.copy className='mr-2 h-4 w-4' />
+                            Use as draft baseline
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          {isHidden ? (
+                            <DropdownMenuItem
+                              onSelect={() => void setVisibility(policy, false)}
+                            >
+                              <Icons.eye className='mr-2 h-4 w-4' />
+                              Restore to dashboard
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              disabled={policy.status === 'active'}
+                              onSelect={() => void setVisibility(policy, true)}
+                            >
+                              <Icons.eyeOff className='mr-2 h-4 w-4' />
+                              Hide from dashboard
+                            </DropdownMenuItem>
+                          )}
+                          {policy.status === 'draft' && (
+                            <DropdownMenuItem
+                              className='text-destructive focus:text-destructive'
+                              onSelect={() => setDeleteTarget(policy)}
+                            >
+                              <Icons.trash className='mr-2 h-4 w-4' />
+                              Delete draft
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
 
                   <div>
                     <p className='font-medium text-brand-navy'>
@@ -606,7 +736,9 @@ export default function PolicyStudioPage() {
           {policies.length === 0 && (
             <Card>
               <CardContent className='p-5 text-sm text-muted-foreground'>
-                No policy versions are available.
+                No policy versions are available.{' '}
+                {!showHidden &&
+                  'Versions hidden from the dashboard are still stored; use "Show hidden versions" to review them.'}
               </CardContent>
             </Card>
           )}
@@ -1003,7 +1135,7 @@ export default function PolicyStudioPage() {
                     type='button'
                     variant='destructive'
                     disabled={busy !== null || detailLoading}
-                    onClick={() => setDeleteConfirmationOpen(true)}
+                    onClick={() => setDeleteTarget(selectedPolicy)}
                   >
                     Delete draft
                   </Button>
@@ -1040,15 +1172,18 @@ export default function PolicyStudioPage() {
       </Dialog>
 
       <AlertDialog
-        open={deleteConfirmationOpen}
-        onOpenChange={setDeleteConfirmationOpen}
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && busy === null) setDeleteTarget(null)
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this draft?</AlertDialogTitle>
             <AlertDialogDescription>
-              Draft {selectedPolicy?.version_id} will be permanently removed.
-              Simulated and historical policies cannot be deleted.
+              Draft {deleteTarget?.version_id} will be permanently removed.
+              Simulated and historical policies cannot be deleted; hide them
+              from the dashboard instead.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
