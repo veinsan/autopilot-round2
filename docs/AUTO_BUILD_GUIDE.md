@@ -541,10 +541,23 @@ Continue "OP-06 First-Payroll Verification".
   write; never fall back to a standard manager queue.
 ```
 
-**Gate tests:** a Manager cannot list, fetch, or act on the payroll case even
-when the employee is their direct report; People Ops/payroll can; the literal
-source error text cannot be found in any standard API response, event, case, or
-Slack output.
+**Tests:**
+
+Field yang sama di semua baris: `command_id` = sama dengan `execution_id`;
+`trigger_source` = `command_center`; pin `as_of_date="2026-08-03"`.
+
+| Urutan | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan sebelum run |
+|---|---|---|---|---|---|
+| 1 | Case dibuat untuk Error | `EMP7062` | `cmd_5d164bd8b72dd632465fdd4d582c132d` | Satu `workbench_cases` baru dengan `case_type=payroll`, terkait `payroll_id=PAY-40063`; `sanitized_context` hanya berisi field aman (outcome, evidence, severity) | Tidak ada |
+| 2 | Case dibuat untuk Not Confirmed | `EMP7001` | `cmd_18a65e81d805f6164ce2d9c220b1015d` | Satu `workbench_cases` baru terkait `payroll_id=PAY-40002` | Tidak ada |
+| 3 | Case per-employee untuk Record Missing | `EMP7000` | `cmd_f8a02873f949cd97d422bdadb0f76ca7` | Satu `workbench_cases` baru terkait `employee_id=EMP7000` (bukan per payroll_id, karena tidak ada row payroll); `sanitized_context` tidak berisi cycle yang direka-reka | Hapus sementara payroll row: `delete from "Payroll_Records" where payroll_id='PAY-40001';` |
+| 4 | Run berulang → update case yang sama | `EMP7062` | `cmd_db7b28da7cf6619911b33f2f39ff61a0` | Masih **tepat satu** `workbench_cases` untuk `payroll_id=PAY-40063` (bukan case baru); `updated_at`/isi berubah, `case_id` tetap sama seperti test #1 | Jalankan langsung setelah #1, tanpa ubah data |
+| 5 | Sinyal berulang setelah resolusi manusia → reopen | `EMP7062` | `cmd_a8f8e919d606849131f26d5c95c17707` | Case `PAY-40063` yang tadinya di-resolve kembali `status=open` (reopened), bukan case baru | Sebelum run: `update "workbench_cases" set status='resolved', resolved_at=now() where case_id=<case_id dari test #1>;` |
+| 6 | CLEAR tidak pernah auto-close case | `EMP7000` | `cmd_fa57a4fe93466f1a8efc53eba72edf10` | Case employee `EMP7000` dari test #3 **tetap terbuka** (status tidak berubah jadi resolved secara otomatis) meski hasil evaluasi sekarang CLEAR | Kembalikan payroll row `EMP7000` (`insert` seperti catatan di bawah §6.2) supaya hasil jadi Paid/CLEAR; jangan resolve case secara manual |
+| 7 | Tidak ada field sensitif tersimpan | `EMP7062` | `cmd_2aa9133471927cf0f28dbc6d908bf475` | Query langsung `workbench_cases` untuk case `PAY-40063`: pastikan **tidak ada** `error_reason`, `gross`, atau `net` di `sanitized_context` mana pun, walau sumber datanya (`Payroll_Records.error_reason`) mengandung teks tersebut | Jalankan setelah test #1/#4, cek langsung isi `sanitized_context` via SQL |
+| 8 | Restricted route tidak tersedia → system_exception, tanpa fallback | `EMP7001` | `cmd_647b25dc7121f5eb4f12855850fc6031` | Satu `system_exception` operasional; **tidak ada** case baru/terupdate di `workbench_cases` maupun tabel manager-visible mana pun — buktikan tidak fallback ke antrian manager standar | Sebelum run, arahkan sementara endpoint tulis OP-04 restricted case action ke path yang salah (typo); kembalikan setelah test |
+
+RBAC-nya sendiri (Manager tidak bisa list/fetch/act atas case payroll walau dia manager langsung karyawan tsb; People Ops/payroll bisa) sudah dibuktikan generik oleh G-02 (lihat tracker: Done, 60 focused + 144 full test, live local JWT). Untuk 6.3 cukup satu langkah verifikasi tambahan: pakai `case_id` hasil test #1 di atas, coba `GET`/`PATCH` case itu dengan JWT Manager biasa (harus 403) dan dengan JWT `people_ops_payroll` (harus berhasil) — tidak perlu mengulang seluruh suite G-02.
 
 ## 4. OP-07 — Cross-Team Readiness & Manager Accountability
 
@@ -596,13 +609,16 @@ milestone, including CLEAR outcomes. Return the common OP-07 envelope.
 
 **Tests:**
 
-| # | Scenario | Input | Expected |
-|---|---|---|---|
-| 1 | Three grouped blockers | `EMP7063`, `as_of=2026-08-03` | One `DAY_ONE_DEPENDENCY_BLOCKED` finding with `DEP-10253`, `DEP-10255`, `DEP-10256`; not three cases. |
-| 2 | Three overdue milestones | `EMP7101`, same as-of | One `LEARNING_MILESTONE_OVERDUE` finding with `LRN-30304`, `LRN-30305`, `LRN-30306`. |
-| 3 | Clean | `EMP7008` | No OP-07 finding: incomplete dependencies are not Day-1 blockers and all learning is complete. |
-| 4 | Invalid due day | Controlled `due_day=Soon` | Data-quality exception; no guessed deadline. |
-| 5 | Privacy | Place `SENTINEL_CONFIDENTIAL_XYZ` in a confidential Peakon comment | Sentinel cannot appear anywhere because this step never reads the column. |
+Field yang sama di semua baris: `scope=employee`; `command_id` = sama dengan
+`execution_id`; `trigger_source` = `command_center`; pin `as_of_date="2026-08-03"`.
+
+| Urutan | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan sebelum run |
+|---|---|---|---|---|---|
+| 1 | Grouped Day-1 blockers (+ learning ikut nyata) | `EMP7063` | `cmd_7f7544c380d7e2b1797efb005d7c9652` | Satu `DAY_ONE_DEPENDENCY_BLOCKED` dengan evidence `DEP-10253`, `DEP-10255`, `DEP-10256` (bukan 3 finding terpisah); juga satu `LEARNING_MILESTONE_OVERDUE` nyata dengan `LRN-30190`, `LRN-30192` (due `2026-06-02`/`2026-07-25`, keduanya sebelum `as_of`) — ini bukan bug, dataset EMP7063 memang punya keduanya | Tidak ada |
+| 2 | Tiga milestone overdue (+ 1 dependency blocked ikut nyata) | `EMP7101` | `cmd_69f62f3d238b0491e49856589272a006` | Satu `LEARNING_MILESTONE_OVERDUE` dengan evidence `LRN-30304`, `LRN-30305`, `LRN-30306` (due `2026-05-13`/`2026-06-05`/`2026-07-05`, semua sebelum `as_of`); juga satu `DAY_ONE_DEPENDENCY_BLOCKED` dengan `DEP-10407` saja (`DEP-10408` sudah Done, tidak ikut) | Tidak ada |
+| 3 | Bersih | `EMP7008` | `cmd_a39ceefc8af272b1144306aac4d34d0e` | Tidak ada finding OP-07 sama sekali: dependency `EMP7008` yang belum Done semuanya `blocks_day_one=false`; semua learning milestone Completed | Tidak ada |
+| 4 | `due_day` tidak valid | `EMP7000` | `cmd_fb67a5b04ad5449ac05655ce15ab077e` | Satu data-quality `system_exception` untuk milestone clone (tidak ada deadline yang ditebak); finding nyata `EMP7000` yang lain (`DAY_ONE_DEPENDENCY_BLOCKED` dari `DEP-10002`/`DEP-10003`, `LEARNING_MILESTONE_OVERDUE` dari `LRN-30002`) tetap muncul — buktikan item invalid tidak menghentikan evaluasi item lain | Clone milestone: `insert into "Learning_Milestones" (milestone_id, employee_id, course, due_day, status) values ('LRN-30001-INVALID', 'EMP7000', 'Test Invalid Due Day', 'Soon', 'In Progress');`. Setelah test, hapus: `delete from "Learning_Milestones" where milestone_id='LRN-30001-INVALID';` |
+| 5 | Privacy — sentinel tidak boleh bocor | `EMP7000` | `cmd_5add517dc16905b95ce66613934cc8fb` | Findings sama seperti data asli `EMP7000` (tanpa clone test #4); string `SENTINEL_CONFIDENTIAL_XYZ` **tidak muncul** di variabel Operator, output, Activity Timeline, atau `workflow_events` — buktikan kolom `Comment`/Peakon memang tidak pernah dibaca step ini | Sebelum run: `update "Peakon_Engagement" set "Comment" = 'SENTINEL_CONFIDENTIAL_XYZ - temporary test marker' where "Response_ID" = 'PK-5001';`. Setelah run, kembalikan: `update "Peakon_Engagement" set "Comment" = 'Good start, team is welcoming.' where "Response_ID" = 'PK-5001';` |
 
 ### 7.2 — Cohort dependency bottlenecks
 
@@ -637,17 +653,25 @@ a system_exception. Never calculate from a partial first page.
 
 **Tests:**
 
-| # | Scenario | Setup | Expected |
-|---|---|---|---|
-| 1 | Both thresholds pass | `COH-2026-W22`, min workers <=14 and min percent <=73.7 | Security bottleneck: 14 of 19, about 73.7%; code `COHORT_DEPENDENCY_BOTTLENECK`. |
-| 2 | Count suppresses | min workers 15 | No Security bottleneck. |
-| 3 | Percent suppresses | min percent 75 | No Security bottleneck. |
-| 4 | Pagination | Force dependency response to multiple pages | Same 14/19 result as unpaginated test. |
+Field yang sama di semua baris: `scope=cohort`, `cohort=COH-2026-W22`;
+`command_id` = sama dengan `execution_id`; `trigger_source` = `command_center`;
+pin `as_of_date="2026-08-03"`.
+
+| Urutan | Scenario | execution_id | Expected output | Tindakan tambahan sebelum run |
+|---|---|---|---|---|
+| 1 | Kedua threshold lolos (policy default) | `cmd_aeea9486642a9a82056cd2fb63af451a` | `COHORT_DEPENDENCY_BOTTLENECK` untuk team Security: 14 dari 19 (~73.7%); policy default (`bottleneck_min_workers=2`, `bottleneck_min_percent=25`) sudah cukup, tanpa perlu ubah policy | Tidak ada |
+| 2 | Jumlah pekerja menekan (suppressed) | `cmd_562b0899a4903848b39e124b06f6df63` | Tidak ada bottleneck Security (14 < 15) meski persentase tetap lolos; baris `policy_evaluations` untuk team Security tetap ditulis sebagai suppressed, bukan diam-diam dilewati | Buat draft policy baru via Policy Studio dengan `bottleneck_min_workers=15`, simulate → approve → activate; setelah test, kembalikan `policy_round2_v1` sebagai active |
+| 3 | Persentase menekan (suppressed) | `cmd_0545d8219d3b9160f1d2ba7541cbc1ff` | Tidak ada bottleneck Security (73.7% < 75%) meski jumlah pekerja tetap lolos; baris `policy_evaluations` untuk team Security tetap ditulis sebagai suppressed | Buat draft policy baru via Policy Studio dengan `bottleneck_min_percent=75`, simulate → approve → activate; setelah test, kembalikan `policy_round2_v1` sebagai active |
+| 4 | Paginasi REST | `cmd_e098a82b32fb70a0f210c4927999c884` | Hasil identik dengan #1 (14 dari 19, Security bottleneck); buktikan tidak ada data yang hilang akibat membaca halaman pertama saja | Sebelum run, kecilkan sementara page size/limit REST `Cross_Team_Dependencies` di step ini (mis. `limit=5`) supaya respons kepotong jadi beberapa halaman; kembalikan ke limit asli setelah test |
+
+Setelah baris #3, pastikan `policy_round2_v1` (thresholds default: `bottleneck_min_workers=2`, `bottleneck_min_percent=25`) sudah diaktifkan kembali sebelum lanjut ke test/stage lain.
 
 ### 7.3 — Manager accountability state machine (G-03 required)
 
-Do not paste this prompt until the server-owned state source named in G-03 is
-live and its exact table/API fields have replaced the placeholders below.
+G-03 is live: the source is Supabase table `manager_action_states` (written
+only via RPC `record_manager_action_event`, never direct insert/update from
+Auto) joined to `workbench_cases` for `case_type`/`priority`. Its fields match
+the required list below exactly, so the placeholder has been replaced.
 
 **Prompt:**
 
@@ -657,7 +681,10 @@ system state, never from an inferred behavioral signal.
 
 Continue "OP-07 Cross-Team Readiness & Manager Accountability".
 
-Read only the approved manager-action state source: {MANAGER_ACTION_STATE_API}.
+Read only the approved manager-action state source: Supabase table
+"manager_action_states" joined to "workbench_cases" for case_type/priority.
+Exclude any case where workbench_cases.case_type is payroll or confidential
+before any manager logic runs.
 Required fields are case_id, employee_id, current_state, nudge_created_at,
 delivered_at, acknowledged_at, action_verified_at, escalated_at,
 successful_reminder_count, next_reminder_at, acknowledgment_deadline,
@@ -687,15 +714,28 @@ disengaged, negligent, or likely to resign.
 
 **Tests:**
 
-| State fixture | Expected |
-|---|---|
-| Delivered, deadline passed, no acknowledgment | `MANAGER_ACKNOWLEDGMENT_OVERDUE`. |
-| Delivered, explicit acknowledgment before deadline | No acknowledgment finding. |
-| Acknowledged, action deadline passed, no verified action | `MANAGER_ACTION_OVERDUE`. |
-| Slack failure | Operational exception; reminder count unchanged. |
-| Duplicate delivery event | One state transition; one successful reminder count. |
-| Payroll/confidential case | Excluded from OP-07 manager path. |
-| Only `Peakon_Engagement.manager_response_days=6` (for example `EMP7013`) but no authoritative action state | No manager-overdue finding. |
+Catatan: INPUT contract persis untuk 7.3 (scope per-case vs. scan-all) belum
+final karena stage ini belum di-build di Auto Studio. Tabel di bawah
+mengasumsikan `scope=employee` seperti 7.1 (`employee_id`, `execution_id`,
+`command_id`=`execution_id`, `trigger_source=command_center`, pin
+`as_of_date="2026-08-03"`) — sesuaikan begitu prompt di atas benar-benar
+di-paste dan kontrak inputnya dikonfirmasi. Setiap baris butuh fixture di
+`workbench_cases` + `manager_action_states` lebih dulu (lihat kolom terakhir);
+`record_manager_action_event` adalah RPC yang sudah ada di schema, dipanggil
+lewat `POST {SUPABASE_URL}/rest/v1/rpc/record_manager_action_event` atau
+langsung `select` di SQL editor.
+
+| Urutan | Scenario | employee_id | execution_id | Expected output | Fixture (jalankan sebelum run) |
+|---|---|---|---|---|---|
+| 1 | Delivered, ack deadline lewat, belum ack | `EMP7009` | `cmd_7f0cc415af8c17ab878cf27d6a2188e4` | `MANAGER_ACKNOWLEDGMENT_OVERDUE` untuk `CASE-73-01` | `insert into "workbench_cases" (case_id, employee_id, case_type, priority, status) values ('CASE-73-01','EMP7009','dependency','high','open');`<br>`select record_manager_action_event('CASE-73-01','EVT-73-01-1','nudge_created','2026-07-28T00:00:00Z','2026-07-30T00:00:00Z','2026-07-30T00:00:00Z','2026-08-09T00:00:00Z');`<br>`select record_manager_action_event('CASE-73-01','EVT-73-01-2','delivery_succeeded','2026-07-28T00:05:00Z');` |
+| 2 | Delivered, ack eksplisit sebelum deadline | `EMP7010` | `cmd_2c07d2b4d1efa22ee9c7c011d721ddc5` | Tidak ada `MANAGER_ACKNOWLEDGMENT_OVERDUE`/`MANAGER_ACTION_OVERDUE` untuk `CASE-73-02` | Sama seperti #1 tapi `case_id='CASE-73-02'`, `employee_id='EMP7010'`; tambahkan `select record_manager_action_event('CASE-73-02','EVT-73-02-3','acknowledged','2026-07-29T10:00:00Z');` (sebelum ack_deadline `2026-07-30`) |
+| 3 | Acknowledged, action deadline lewat, belum verified | `EMP7011` | `cmd_cc182b53292944234ae6d25fb9e06ad9` | `MANAGER_ACTION_OVERDUE` untuk `CASE-73-03` | `insert workbench_cases` case `CASE-73-03`/`EMP7011`; `record_manager_action_event('CASE-73-03','EVT-73-03-1','nudge_created','2026-07-20T00:00:00Z','2026-07-22T00:00:00Z','2026-07-22T00:00:00Z','2026-07-27T00:00:00Z')`; `..., 'EVT-73-03-2','delivery_succeeded','2026-07-20T00:05:00Z'`; `..., 'EVT-73-03-3','acknowledged','2026-07-21T09:00:00Z'` (sebelum ack_deadline) |
+| 4 | Kegagalan pengiriman (Slack) | `EMP7012` | `cmd_fb20f732bafeb2f08de2b149f806de57` | Satu operational `system_exception` (`MANAGER_NOTIFICATION_DELIVERY_FAILED`); `successful_reminder_count` tetap 0; state tetap `nudge_created` (bukan `delivered`) | `insert workbench_cases` case `CASE-73-04`/`EMP7012`; `record_manager_action_event('CASE-73-04','EVT-73-04-1','nudge_created','2026-07-30T00:00:00Z','2026-08-01T00:00:00Z','2026-08-02T00:00:00Z','2026-08-07T00:00:00Z')`; `..., 'EVT-73-04-2','delivery_failed','2026-07-30T00:10:00Z'` |
+| 5 | Duplicate delivery event (replay) | `EMP7014` | `cmd_9adcf263d019ff409b823af8680a3d57` | Satu transisi state (`delivered`), `successful_reminder_count=1` (bukan 2) setelah event yang sama dikirim dua kali | `insert workbench_cases` case `CASE-73-05`/`EMP7014`; `record_manager_action_event('CASE-73-05','EVT-73-05-1','nudge_created','2026-07-25T00:00:00Z','2026-07-27T00:00:00Z','2026-07-27T00:00:00Z','2026-08-01T00:00:00Z')`; jalankan `..., 'EVT-73-05-2','delivery_succeeded','2026-07-25T00:05:00Z'` **dua kali persis** (source_event_id sama) |
+| 6 | Case payroll dikecualikan | `EMP7015` | `cmd_292cf2a30c60fb2c64fdc82d55f57262` | Tidak ada finding manager apa pun untuk `CASE-73-06` walau ack deadline sudah lewat — dikecualikan karena `case_type='payroll'` | `insert into "workbench_cases" (case_id, employee_id, case_type, priority, status) values ('CASE-73-06','EMP7015','payroll','high','open');` lalu fixture ack-overdue sama seperti #1 dengan `case_id='CASE-73-06'` |
+| 7 | Peakon bukan sumber otoritatif | `EMP7013` | `cmd_1dd7cddec3436f55d144825585622798` | Tidak ada finding manager-overdue; `Peakon_Engagement.manager_response_days=6` milik `EMP7013` (`PK-5032`) tidak boleh dipakai sebagai bukti | Tidak ada — jangan buat baris `manager_action_states` untuk `EMP7013` sama sekali |
+
+Setelah selesai, hapus semua fixture test (`delete from "manager_action_events" where case_id like 'CASE-73-%'; delete from "manager_action_states" where case_id like 'CASE-73-%'; delete from "workbench_cases" where case_id like 'CASE-73-%';` — urutan ini penting karena foreign key).
 
 ## 5. OP-01/02/03 — Active-policy compatibility amendment
 
@@ -959,7 +999,7 @@ is not evidence.
 | 5.2 | OP-05 | Compliance/work-auth rules + logs | Build/test | Verify persisted log | 5.1 | Saved | Partial | `EMP7054` completed with the expected compliance legal-breach finding after jurisdiction-threshold parsing was corrected; remaining rule, persistence, and idempotency tests pending. |
 | 5.3 | OP-05 | Partial failure behavior | Build/test | Verify safe API result | 5.2 | Done | Passed (3/3) | All 3 tests passed: stop-on-read-failure (`EMP-NOT-FOUND`), item-level isolation (`EMP7032` + malformed clone), and write-retry-then-integration-failure. Fixed a state-propagation bug in `evaluate_compliance_context` — `worker_found`/`policy_version_id`/`as_of_local_date` were never written to `workflow_step_state`, only passed locally to `display_results()`, causing downstream to always see the upstream context as missing. |
 | 6.1 | OP-06 | Restricted context/read | Build/test | Privacy review | G-01 | Saved | Not started | Initial context/read workflow saved; privacy and fixture tests pending. |
-| 6.2 | OP-06 | Payroll rules + logs | Build/test | Verify persisted log | 6.1 | Not started | Not started | |
+| 6.2 | OP-06 | Payroll rules + logs | Build/test | Verify persisted log | 6.1 | Done | Passed (8/8) | All tests passed including 7a/7b (policy-version-aware cutoff). Found and fixed a classification bug: pending/unconfirmed/blank status before cutoff fell through to the catch-all `else` and raised `data-quality system_exception` instead of CLEAR — the branching never handled "recognized status, cutoff not yet passed." |
 | 6.3 | OP-06/OP-04 | Restricted payroll case route | Build after gate | Prove G-02 | G-02, 6.2 | Ready after 6.2 | Not started | G-02 is satisfied; do not bypass the restricted route |
 | 7.1 | OP-07 | Dependencies + learning | Build/test | Fixture support | G-01 | Saved | Not started | Initial employee-mode workflow saved; dependency, learning, and privacy tests pending. |
 | 7.2 | OP-07 | Cohort bottlenecks | Build/test | Verify API parity | 7.1 | Not started | Not started | |
