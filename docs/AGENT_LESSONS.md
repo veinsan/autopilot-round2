@@ -182,3 +182,113 @@ credentials or confidential payloads.
 
 - Mistake: reviewed a proposed manager-accountability step in isolation without first checking whether the pipeline's final step ("Write Evaluation and Output") ever reads its output variable. It read `step_learning_eval_output` directly — a fourth step would have executed and produced findings that never reached the final envelope or `policy_evaluations`, silently, with no error anywhere.
 - Prevention: when reviewing or extending a multi-step Auto pipeline, trace the actual `globals()[f"step_..._output"]` write in each step against the `globals().get(...)` read in the next one, end to end, before reviewing any single step's internal logic. A step can be perfectly correct and still contribute nothing if the chain isn't wired to it.
+
+## Auto Studio live-build lessons — 2026-08-06
+
+### Treat Activity Timeline and database rows as the source of truth
+
+- Mistake: builder summaries claimed four scenarios had passed, named a different
+  deterministic ID, or said persistence succeeded while the Activity Timeline
+  showed only one run or `INTEGRATION_FAILURE`.
+- Prevention: accept a result only after checking the raw step outputs and a
+  direct Supabase query. When the summary disagrees, quote the actual Timeline
+  value back to the builder and do not save the workflow as final.
+
+### Unsaved chat builds and saved Operator versions are different execution targets
+
+- Mistake: trying to rerun a changed workflow from **My Operators** before the
+  chat version was committed; My Operators executes the last saved version, not
+  the in-chat draft.
+- Prevention: ask the builder to run the exact same inputs again inside the same
+  chat before saving. If the builder cannot rerun, save a clearly named
+  checkpoint (`... Pending`), test the saved version, and only then create the
+  verified final version.
+
+### Keep automatic builder auto-fix off for deterministic contract bugs
+
+- Mistake: treating policy parsing, shared-state propagation, REST contract, or
+  idempotency errors as transient step failures that automatic retries could
+  repair.
+- Prevention: leave `Allow automatic step retries (auto-fix)` off while
+  rebuilding deterministic logic. Use application-level retry only from the
+  active policy profile after the request and state contract are correct.
+
+### Policy thresholds can be structured objects, not only scalars
+
+- Mistake: rejecting active policy values such as
+  `{"default":14}` and `{"default":30}` as invalid numeric thresholds, causing
+  `POLICY_CONTEXT_INVALID` even though the database snapshot was valid.
+- Prevention: validate both non-negative numeric values and objects with a
+  non-negative numeric `default` plus optional jurisdiction overrides. Verify
+  the live JSON shape in SQL before rebuilding Auto logic.
+
+### Log sanitization must not delete internal routing state
+
+- Mistake: a sanitization rebuild hid the full policy and worker record but also
+  removed the internal `reason_codes` array and `jurisdiction`, producing
+  `reason_code_count=0` and `exception:<employee>:missing_jurisdiction`.
+- Prevention: separate internal shared state from display/log projections.
+  Preserve the minimum internal fields required by the next step, while logging
+  only counts and safe identifiers. Trace the global/shared-state write and read
+  after every sanitization change.
+
+### Do not hard-code the current reason-code count
+
+- Mistake: temporarily requiring exactly 18 codes fixed one test but would reject
+  a future approved policy that safely extends the registry.
+- Prevention: require a non-empty active-policy registry and parity with the
+  engineering registry. Use the observed count only as a test assertion for the
+  current version, not as permanent business logic.
+
+### Deterministic identities are required at every persistence layer
+
+- Mistake: OP-06 initially generated a random UUID for each
+  `policy_evaluations` write. A replay with the same execution ID increased the
+  row count from one to two even though the business outcome was identical.
+- Prevention: derive the evaluation ID from stable execution, Operator, policy,
+  object, and rule/classification inputs; upsert with
+  `on_conflict=evaluation_id`; prove idempotency with the same execution ID and
+  direct `count(*)` queries.
+
+### Detectors must not also be governed case writers
+
+- Mistake: OP-06 wrote `payroll-PAY-40063` directly while OP-04 also wrote the
+  canonical `payroll:EMP7062`, leaving two open cases for one signal.
+- Prevention: OP-05/06/07 return safe findings only. ORCH-01 merges them and
+  OP-04 is the single governed Workbench/notification writer. Preserve old cases
+  as audit history and close the legacy duplicate through a human Workbench
+  action rather than deleting it in SQL.
+
+### Scope authentication fixes to the one failing REST request
+
+- Mistake: a plan to fix one HTTP 401 proposed adding `httpx`, changing all
+  communication steps, and optimizing already-verified worker/payroll reads.
+- Prevention: reject broad plans. Rebuild only the failing Custom REST upsert,
+  reuse the saved Supabase credential already proven in neighboring steps, and
+  keep all other behavior unchanged.
+
+### Re-query the active policy before every test block
+
+- Mistake: assuming the previously verified policy ID was still active while a
+  teammate had activated a new `7.3` version concurrently.
+- Prevention: query `policy_versions where status='active'` immediately before a
+  test series. Record the exact `policy_version_id` in evidence and rerun the
+  final OP-05/OP-04 smoke tests after policy changes.
+
+### Case identity evidence must come from the persisted Round 2 key
+
+- Mistake: treating the legacy `Generate Case ID` UUID as proof of Round 2 case
+  determinism.
+- Prevention: a legacy UUID may remain for Round 1 branches, but verify the
+  actual Round 2 `workbench_cases.case_id`, such as
+  `compliance:EMP7054:SG` or `payroll:EMP7062`, and prove repeat delivery keeps
+  `case_count=1`.
+
+### Inspect the actual table schema before writing verification SQL
+
+- Mistake: querying `workbench_cases.updated_at` when that column did not exist,
+  interrupting an otherwise valid verification sequence.
+- Prevention: inspect `information_schema.columns` or the repository schema
+  before selecting convenience timestamps. Use only confirmed columns in live
+  evidence queries.
+
