@@ -1467,149 +1467,196 @@ sebagai evidence, bukan centang tanpa bukti.
 | Degraded mode | Satu kegagalan Operator/integrasi jadi system_exception yang kelihatan, branch lain tetap jalan | ORCH-01 O.1 test #2; §5.3 test #1–#3; §6.3 test #8 | Tidak ada |
 | Generality | Logika rule-based, dipakai di banyak employee/cohort; tidak ada perilaku yang di-hardcode ke satu fixture ID | Seluruh guide sudah memakai >20 `employee_id` berbeda (`EMP7000`–`EMP7147`) lintas §5–§8 plus `COH-2026-W22` | Tidak ada — kalau reviewer minta bukti tambahan, tunjuk baris-baris test di §2–§8 sebagai daftar |
 
-## 9.1 Live verification update — 2026-08-06
+## 9.1 Live verification update — 2026-08-07
 
-This section records evidence produced jointly by Person A and Person B after the
-original tracker entries were written. The raw Auto Activity Timeline and direct
-Supabase queries are the source of truth; builder summaries are not accepted as
-evidence when they disagree with either source.
+This section is the current handoff checkpoint after the 2026-08-06/07 live
+Auto session. Raw Activity Timeline outputs and direct Supabase queries remain
+the source of truth; builder summaries are not accepted when they disagree.
 
-### Policy, schema, and identity gates
+### Policy, schema, identity, and runtime gates
 
-- The latest additive `config/supabase_schema.sql` was applied successfully to
-  the live Supabase project.
-- A direct query confirmed exactly one active policy. The current active version
-  at the end of the session is
-  `policy_29dfdf8bbb3441d0aa758b2b020773fe` (`change_summary="7.3"`,
-  `config_snapshot.version="2.0"`, `demo_mode=false`). Earlier OP-05 and OP-04
-  evidence used the then-active
-  `policy_a9c97994724541148b8697ad8ccc64f8`; rerun their final smoke tests against
-  the current active policy before the end-to-end rehearsal.
-- The active-policy lifecycle remains versioned. `policy_round2_v1` is retained
-  as the reviewed rollback origin; rollback must still create and activate a new
-  immutable version rather than mutating history.
-- Keycloak user `payroll-reviewer` was verified live with exactly the application
-  roles `people_ops_payroll` and `user`. Admin and payroll-reviewer logins both
-  succeeded in the Command Center.
+- The additive Supabase schema, Keycloak setup, payroll RBAC, manager-action
+  state contract, and Command Center UI gates remain passed.
+- Exactly one policy was active at the latest check:
+  `policy_9ccde26035e0415da4291cabe210868a`, parent
+  `policy_round2_v1`, `change_summary="Rollback candidate from policy_round2_v1"`,
+  config version `2.0`, and `demo_mode=false`.
+- Earlier evidence under `policy_a9c97994724541148b8697ad8ccc64f8` and
+  `policy_29dfdf8bbb3441d0aa758b2b020773fe` remains valid historical evidence,
+  but final integration smoke tests must use the policy active at rehearsal
+  time.
+- `thresholds.manager_max_reminders` is currently structured as
+  `{"default":2}`; Operators must accept the object shape as well as a direct
+  scalar where the contract permits it.
+- Stale Auto executions were terminated after the workspace showed nine
+  lingering `Running` jobs. The post-cleanup runtime state was `Running=0`,
+  `Waiting=0`, `Completed=46`, and `Cancelled=53`. Total history count was not
+  treated as a documented hard limit.
 
 ### OP-05 live evidence
 
-The OP-05 context and deterministic evaluator were rebuilt and verified live:
-
-- `EMP7099` clear path: one worker resolved in `Australia/Sydney`; active policy
-  carried forward; two verified compliance items plus work-authorization rule
-  persisted as three `CLEAR` `policy_evaluations`; final `findings=[]`,
-  `reasons=[]`, `system_exceptions=[]`.
-- `EMP7054` breach path: worker resolved in `Asia/Singapore`; `CMP-80109`
-  produced `COMPLIANCE_LEGAL_BREACH`; `CMP-80110` and work authorization were
-  `CLEAR`; no system exception.
-- Duplicate delivery with the same execution ID kept exactly three evaluation
-  rows and one row per deterministic `evaluation_id`.
-- The context failure root cause was confirmed: policy retrieval/parsing and
-  shared-state propagation had to be rebuilt. Threshold objects such as
-  `{"default":14}` and `{"default":30}` are valid and must not be rejected as
-  non-numeric policy values.
-
-Remaining before ORCH-01 integration:
-
-- normalize the final OP-05 `findings` objects to the common
-  `reason_code/domain/severity/evidence_refs/owner/recommended_action` contract;
-- run a short regression against the current active policy version;
-- add and verify sanitized `workflow_events` correlation.
+- Clear (`EMP7099`), legal-breach (`EMP7054`), deterministic replay, and all
+  three failure-behavior tests remain passed.
+- `EMP7054` produced `COMPLIANCE_LEGAL_BREACH` for `CMP-80109`; `CMP-80110` and
+  work authorization remained clear. Replaying the same execution preserved one
+  deterministic evaluation row per evaluated object/rule.
+- Before ORCH-01 integration, run one regression against the then-current active
+  policy and confirm the final OP-05 finding objects still match the common
+  envelope. The full work-auth threshold matrix is useful evidence but is not on
+  the immediate critical path.
 
 ### OP-06 live evidence
 
-OP-06 is now a verified detector-only Operator:
+- OP-06 remains a detector-only workflow. `EMP7062` produced the privacy-safe
+  `PAYROLL_ERROR_DETECTED` finding for `payroll:PAY-40063` with severity
+  `critical`, owner `people_ops_payroll`, and no salary/error detail exposure.
+- Execution `cmd_op06_detector_audit_002` persisted deterministic evaluation
+  `eval_384f4e323463fcab9ab42c921a6992be`; replay kept `row_count=1` and
+  `evaluation_count=1`.
+- OP-06 no longer writes Workbench cases. OP-04 owns the canonical restricted
+  case `payroll:EMP7062`.
+- Historical cleanup remains: close the legacy direct-writer case
+  `payroll-PAY-40063` through a human Workbench action, not a SQL delete.
 
-- `EMP7062` produced `PAYROLL_ERROR_DETECTED`, severity `critical`, domain
-  `payroll`, evidence `payroll:PAY-40063`, owner `people_ops_payroll` without
-  selecting or exposing `error_reason`, `gross`, or `net`.
-- The policy-evaluation ID is deterministic and idempotent. Two deliveries with
-  execution ID `cmd_op06_detector_audit_002` produced the same ID
-  `eval_384f4e323463fcab9ab42c921a6992be`; direct SQL confirmed
-  `row_count=1` and `evaluation_count=1`.
-- A transient rebuild introduced HTTP 401 on the audit upsert. The fix was
-  limited to the `Classification & Logging` Custom REST request, reusing the
-  already-working saved Supabase credential. The final run reported
-  `integration_status=SUCCESS` and the row existed in `policy_evaluations`.
-- The former `Hand Off to Case Writer` step no longer writes
-  `workbench_cases`; it returns only the privacy-safe finding for ORCH-01/OP-04.
+### OP-07 live evidence — core verified
 
-Historical cleanup remains: the old direct-writer case `payroll-PAY-40063` and
-the canonical OP-04 case `payroll:EMP7062` both exist. Close the legacy case
-through the human Workbench action flow; do not delete it directly in SQL.
+Saved integrated checkpoint:
+`OP-07 Cross-Team Readiness — Core Verified` with commit
+`fix(op07): preserve normalized cohort bottleneck evidence and ownership`.
+
+Employee mode:
+
+- Execution `cmd_op07_employee_positive_003` for `EMP7063` returned exactly two
+  normalized findings: `DAY_ONE_DEPENDENCY_BLOCKED` and
+  `LEARNING_MILESTONE_OVERDUE`.
+- Seven deterministic evaluations were persisted: four dependency decisions and
+  three learning decisions. Replaying the same execution kept the count at
+  seven.
+
+Manager accountability regression after the final step rebuild:
+
+- Fixture `CASE-73-01` for `EMP7009` was in `delivered` state with
+  `successful_reminder_count=1`, an expired acknowledgment deadline, and no
+  acknowledgment.
+- Execution `cmd_op07_manager_smoke_001` returned exactly one
+  `MANAGER_ACKNOWLEDGMENT_OVERDUE` finding with evidence
+  `case:CASE-73-01`; Day-1 and Learning were clear.
+- Direct SQL confirmed eight evaluation rows. State remained `delivered`, count
+  remained `1`, and `escalated_at` remained null because `1 < 2`.
+
+Cohort mode:
+
+- The final regression `cmd_op07_cohort_manager_normalization_003` evaluated
+  `COH-2026-W22` with denominator `19` and thresholds `2` workers / `25%`.
+- Security fired at `14/19 = 73.68%`; Facilities `4/19`, IT `3/19`, and Payroll
+  `1/19` were suppressed.
+- The final finding preserves 14 sorted safe `dependency:<DEP-...>` evidence
+  references, `cohort`, `team`, `affected_count`, `denominator`, `percentage`,
+  owner `people_ops_operations`, and the specific cohort-review action.
+- Four deterministic cohort-team evaluations were persisted: three `clear`, one
+  `non_compliant`. Final status was `completed` with no system exceptions.
+- Learning and Manager Accountability correctly bypassed in cohort mode.
+
+Remaining OP-07 technical debt:
+
+- Real result-page pagination for `Cross_Team_Dependencies` is still blocked.
+  The code chunks employee IDs for the `in.()` filter but does not yet implement
+  a `limit`/`offset` or `Range` loop over result pages. This is documented and is
+  not required for the next OP-04/ORCH critical-path tests unless expected live
+  volume can exceed one response page.
+- The top-level final cohort envelope does not separately repeat `cohort`; the
+  value is preserved inside the finding. This is non-blocking for OP-04 but may
+  be polished later if the ORCH contract requires it at top level.
 
 ### OP-04 live evidence
 
-The Round 2 branch of OP-04 has verified compliance and payroll routing while
-preserving the Round 1 branches:
+Verified and saved:
 
-- Active policy retrieval is sanitized; worker names, emails, manager data,
-  Slack channel IDs, templates, and the full policy snapshot no longer appear in
-  the Activity Timeline.
-- Compliance route: `COMPLIANCE_LEGAL_BREACH` for `EMP7054` resolved worker
-  jurisdiction `SG` and upserted canonical case
-  `compliance:EMP7054:SG`. A second delivery with a different execution ID
-  returned `Open / Merged`; direct SQL confirmed `case_count=1`.
-- Payroll route: `PAYROLL_ERROR_DETECTED` for `EMP7062` upserted restricted case
-  `payroll:EMP7062` with only safe reason codes, evidence references, severity,
-  source Operator, and policy version in `sanitized_context`.
-- A prior sanitization attempt accidentally removed internal policy reason codes
-  and worker jurisdiction, producing `reason_code_count=0` and
-  `exception:EMP7054:missing_jurisdiction`. The corrected build preserves the
-  minimum internal routing state while suppressing it from logs.
+- Compliance route: canonical case `compliance:EMP7054:SG`, idempotent merge,
+  no manager Slack.
+- Payroll route: canonical restricted case `payroll:EMP7062` with sanitized
+  context and no manager-visible fallback.
+- Unknown-code route: `XYZ_UNREGISTERED_CODE` produced deterministic system
+  exception case `exception:EMP7008:invalid_code`, target `ops_triage`, and no
+  Slack. Re-run `cmd_op04_unknown_dedup_002` kept exactly one case.
 
 Remaining OP-04 work:
 
-- replace the temporary exact-count validation (`reason_code_count == 18`) with
-  registry parity/non-empty validation so a future approved policy can extend
-  the registry safely;
-- verify unknown-code system-exception routing with no Slack;
-- verify OP-07 Day-1, learning, manager-accountability, and cohort routes;
-- verify reopen-after-human-resolution and CLEAR-never-auto-closes behavior;
-- verify confidential and standard findings proceed independently;
-- add sanitized workflow/audit events.
+- route-test the five OP-07 outputs:
+  `DAY_ONE_DEPENDENCY_BLOCKED`, `LEARNING_MILESTONE_OVERDUE`,
+  `MANAGER_ACKNOWLEDGMENT_OVERDUE`, `MANAGER_ACTION_OVERDUE`, and
+  `COHORT_DEPENDENCY_BOTTLENECK`;
+- prove the cohort code creates insight/audit only and no per-employee case;
+- prove reopen after human resolution and that CLEAR never auto-closes a case;
+- prove confidential and standard findings proceed independently;
+- replace any temporary exact `reason_code_count == 18` validation with
+  non-empty active-policy/engineering-registry parity;
+- add/verify sanitized workflow-event correlation where it belongs in the
+  ORCH/Command Center flow.
 
-### Current critical path
+### OP-01, OP-02, and OP-03 compatibility migration
 
-1. Finish OP-04 unknown-code and OP-07 route tests.
-2. Normalize OP-05 output and run OP-05/OP-04 smoke tests against the current
-   active policy.
-3. Apply the active-policy compatibility amendments to OP-01, OP-02, and OP-03.
-4. Build ORCH-01 parallel fan-out, deterministic merge, branch failure isolation,
-   and OP-04 handoff.
-5. Add command/event correlation, publish workflow IDs, then build the Daily
-   Cohort Sweep.
-6. Run the live acceptance rehearsal: Policy Studio change -> Auto evaluation ->
-   OP-04 case -> human Workbench action -> Dashboard/Insights/audit evidence.
+- A teammate reports that the active-policy compatibility amendments have been
+  applied to OP-01, OP-02, and OP-03.
+- These changes are **not yet accepted as verified**. No saved-builder summary is
+  sufficient by itself; run the essential live regression tables and inspect
+  Activity Timeline plus `policy_evaluations`.
+- Priority order for evidence:
+  1. OP-02 boundary pair proving `as_of_date` is read from the active policy;
+  2. OP-03 latest-score/disclosure/privacy sentinel behavior;
+  3. OP-01 create/update/middle-band/ambiguous-manager behavior and one policy
+     threshold-change proof.
+
+### Current critical path for the next session
+
+1. Verify OP-01/02/03 migrations with a minimal high-value regression set; do
+   not rebuild unless raw evidence fails.
+2. Finish OP-04 routing for all OP-07 reason codes, including cohort insight-only
+   behavior.
+3. Verify OP-04 lifecycle: reopen after human resolution, CLEAR does not close,
+   and confidential/standard independence.
+4. Run one current-policy regression for OP-05 and OP-06, then freeze the
+   detector contracts.
+5. Build/test ORCH-01 parallel fan-out, deterministic merge, branch-failure
+   isolation, and OP-04 handoff.
+6. Complete G-04 workflow UUID mapping and command/event correlation.
+7. Build/test the Daily Cohort Sweep.
+8. Run the live acceptance rehearsal and capture screenshots/query evidence.
+
+Low-priority/defer-until-after-core items:
+
+- OP-07 result-page pagination fix and its blocked test;
+- exhaustive OP-05 threshold/work-auth matrix beyond the current core evidence;
+- closing the legacy payroll case, unless needed for a clean demo Workbench;
+- top-level duplicate `cohort` field polish in OP-07.
 
 ## 10. Build status tracker
 
-Update this table after each saved builder version and test. Put the Activity
-Timeline run ID or other evidence link in the last column; `builder says done`
-is not evidence.
+Update this table only from raw Activity Timeline and direct database/API
+proof. `Builder says done` is not evidence.
 
-| ID | Workflow | Build step | Person A | Person B | Dependency | Build | Tests | Evidence / notes |
-|---|---|---|---|---|---|---|---|---|
-| G-01 | Policy Studio | Activate complete Round 2 policy | Review/activate | Validate contract | None | Done | Passed (69 focused + live SQL) | Exactly one active row verified. Current active version is `policy_29dfdf8bbb3441d0aa758b2b020773fe` (`7.3`, config `2.0`, `demo_mode=false`); `policy_round2_v1` remains the reviewed rollback origin. |
-| G-02 | Command Center | Restrict payroll case RBAC | Supply live route test | Implement RBAC | Backend | Done | Passed (60 focused; 144 full; live local JWT + UI login) | `payroll-reviewer` has only `people_ops_payroll` + `user`; Admin and payroll-reviewer Command Center logins passed. Restricted payroll Workbench view was verified live. |
-| G-03 | Command Center | Publish manager action-state contract | Supply Auto needs | Implement contract | Backend | Done | Passed (unit + clean-install SQL smoke) | Latest additive schema was applied to live Supabase; user-confirmed |
-| UI | Command Center | Policy Studio, Workbench, Dashboard, Data Manager | Build/live-test | Publish APIs | G-01/G-02/G-03 contracts | Done | Production build and local Keycloak provider passed | All user-facing copy is English; protected pages redirect to sign-in |
-| 5.1 | OP-05 | Context/policy/timezone | Build | Fixture support | G-01 | Done | Passed for live valid contexts; negative covered by 5.3 | `EMP7099` resolved `Australia/Sydney`; `EMP7054` resolved `Asia/Singapore`; active policy and shared context propagated correctly. Earlier policy-context parsing/state bugs were rebuilt. |
-| 5.2 | OP-05 | Compliance/work-auth rules + logs | Build/test | Verify persisted log | 5.1 | Saved | Partial (core clear/breach/idempotency passed) | `EMP7099` clear path wrote 3 CLEAR rows. `EMP7054` produced `COMPLIANCE_LEGAL_BREACH`; duplicate delivery kept exactly 3 deterministic rows. Full threshold/work-auth matrix and common finding-envelope normalization remain. |
-| 5.3 | OP-05 | Partial failure behavior | Build/test | Verify safe API result | 5.2 | Done | Passed (3/3) | All 3 tests passed: stop-on-read-failure (`EMP-NOT-FOUND`), item-level isolation (`EMP7032` + malformed clone), and write-retry-then-integration-failure. Fixed a state-propagation bug in `evaluate_compliance_context` — `worker_found`/`policy_version_id`/`as_of_local_date` were never written to `workflow_step_state`, only passed locally to `display_results()`, causing downstream to always see the upstream context as missing. |
-| 6.1 | OP-06 | Restricted context/read | Build/test | Privacy review | G-01 | Saved | Partial (live restricted read passed) | `EMP7062` read only payroll ID/cycle/status and safe worker fields; no `error_reason`, `gross`, or `net` appeared in the Activity Timeline. Full sentinel fixture remains useful for final privacy evidence. |
-| 6.2 | OP-06 | Payroll rules + logs | Build/test | Verify persisted log | 6.1 | Done | Passed (8/8 + detector audit replay) | All original tests passed. Final detector-only audit uses deterministic ID `eval_384f4e323463fcab9ab42c921a6992be`; replay kept `row_count=1` under active policy `policy_29dfdf8bbb3441d0aa758b2b020773fe`. |
-| 6.3 | OP-06/OP-04 | Restricted payroll case route | Build after gate | Prove G-02 | G-02, 6.2 | Saved | Partial (core route/idempotency passed) | OP-06 is detector-only; OP-04 created canonical restricted case `payroll:EMP7062` with sanitized context. OP-06 audit replay is idempotent and no longer writes Workbench cases. Reopen/CLEAR/failure-path tests remain; close legacy `payroll-PAY-40063` through Workbench. |
-| 7.1 | OP-07 | Dependencies + learning | Build/test | Fixture support | G-01 | Done | Passed (5/5) | Grouped Day-1 blockers, learning overdue, clean employee, invalid `due_day` isolation, and the Peakon sentinel privacy check all passed. Two bugs were fixed during the build: `Learning_Milestones` was queried with non-existent columns `id`/`milestone_name` instead of `milestone_id`/`course`, which made `LEARNING_MILESTONE_OVERDUE` silently unable to fire for anyone; and `due_day` was parsed with `re.search` instead of an exact `fullmatch`, so a malformed value like `Day 7 (tentative)` would have been accepted instead of raising a data-quality exception. |
-| 7.2 | OP-07 | Cohort bottlenecks | Build/test | Verify API parity | 7.1 | Saved | Passed (6/7; #6 skipped, blocked) | Tests #1–#5 and #7 passed against real cohort data (`COH-2026-W22`, `W29`, `W17`, `W26`). Test #6 (pagination) cannot run yet: the cohort branch chunks `employee_id` for the `in.()` filter (`chunk_size=200`) but has no result-page `limit`/`offset` loop on `Cross_Team_Dependencies` itself, so there is nothing to shrink without a code change first. |
-| 7.3 | OP-07 | Manager state machine | Build/test | Prove G-03 | G-03, 7.1 | Done | Passed (4/4 live; 6 covered by code review) | Pipeline OP-07 kini 4 step: Day-1 Readiness → Learning → Manager Accountability → Write Evaluation. Empat test esensial lolos (`EMP7009`, `EMP7014`, `EMP7015`, `EMP7016`); escalation menulis lewat RPC dan `CASE-73-07` berpindah ke `escalated`. Bug yang ditemukan dan diperbaiki sepanjang build: step Manager Accountability belum pernah ada dan Write Evaluation membaca output Learning (rantai putus); payload RPC memakai nama argumen yang tidak ada (`case_id`/`new_state`/`event_timestamp` alih-alih `target_case_id`/`new_event_type`/`event_occurred_at`); escalation digerbangi kondisi overdue padahal cap reminder bersifat independen; `reasons` berisi kalimat, bukan reason code; `execution_id` tidak pernah ditulis ke `policy_evaluations`; `Learning_Milestones` di-query dengan kolom `id`/`milestone_name` yang tidak ada |
-| C.1 | OP-01 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Saved | Not started | Migrasi ke active versioned policy sudah diterapkan; tinggal 5 test esensial §5 (clean create, name-variant ≥0.90, pita tengah escalate, manager ambigu, ambang policy). 5 skenario lain turun ke code review. |
-| C.2 | OP-02 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Saved | Not started | Migrasi sudah diterapkan; tinggal 6 test esensial §5. Pasangan boundary `EMP7012` (`as_of` 2026-07-20 vs 2026-08-03) wajib dijalankan — itu satu-satunya bukti `as_of_date` benar-benar dibaca, bukan jam sistem. 2 skenario turun ke code review. |
-| C.3 | OP-03 | Active-policy compatibility | Build/privacy regression | Verify policy log | G-01 | Saved | Not started | Migrasi sudah diterapkan; tinggal 6 test esensial §5, termasuk sentinel leak `PK-5006` yang jadi bukti gate Privacy di §9. 2 skenario turun ke code review. |
-| 4.R2.1 | OP-04 | New-code routing/grouped cases | Build/test | Verify Workbench API | 5.2, 6.2, 7.1 | Saved | Partial (compliance + payroll + compliance dedup passed) | `compliance:EMP7054:SG` and `payroll:EMP7062` verified with sanitized logs/context; repeat compliance delivery kept one case. Unknown code, OP-07 routes, reopen/CLEAR lifecycle, and registry-count de-hardcoding remain. |
-| 4.R2.2 | OP-04 | Confidential independence | Build/test | Privacy review | 4.R2.1 | Not started | Not started | |
-| O.1 | ORCH-01 | Parallel fan-out/merge | Build/test | Observe mocks/API | OP-05/06/07 unit tests | Not started | Not started | |
-| O.2 | ORCH-01 | Command/event correlation | Build/live test | Verify SSE/reconcile | O.1, G-04 | Not started | Not started | |
-| S.1 | Daily Sweep | Schedule/fan-out/aggregation | Build/live test | Verify discovery | O.2, 7.2 | Not started | Not started | |
-| E2E | All | End-to-end acceptance suite | Auto evidence | API/privacy evidence | All gates | Not started | Not started | |
+| ID | Workflow | Build step | Build | Tests | Evidence / notes |
+|---|---|---|---|---|---|
+| G-01 | Policy Studio | Active Round 2 policy | Done | Passed | Latest observed active version: `policy_9ccde26035e0415da4291cabe210868a`, config `2.0`, `demo_mode=false`. Re-query before every test block. |
+| G-02 | Command Center | Restricted payroll RBAC | Done | Passed | Admin/payroll-reviewer login and restricted payroll visibility verified. |
+| G-03 | Command Center | Manager action-state contract | Done | Passed | Live table/RPC contract and manager state fixtures verified. |
+| G-04 | Runtime config | Published workflow UUID mapping | Not started / unverified | Not started | Required before ORCH-01 publish and Command Center production invocation. |
+| UI | Command Center | Policy Studio, Workbench, Dashboard, Data Manager | Done | Passed core build/login | Human Workbench action still needed as acceptance evidence. |
+| 5.1 | OP-05 | Context/policy/timezone | Done | Passed core | Valid SG/AU contexts and safe failure behavior verified. |
+| 5.2 | OP-05 | Compliance/work-auth rules + logs | Saved | Core passed | Clear, legal breach, and replay idempotency passed; run one final current-policy/common-envelope regression. |
+| 5.3 | OP-05 | Failure behavior | Done | Passed 3/3 | Read failure, malformed-item isolation, and exhausted write retry verified. |
+| 6.1 | OP-06 | Restricted payroll context | Saved | Core passed | Privacy-safe field allowlist verified; final sentinel evidence remains optional for acceptance. |
+| 6.2 | OP-06 | Payroll rules + audit | Done | Passed | Detector replay persisted one deterministic row. |
+| 6.3 | OP-06/OP-04 | Restricted payroll route | Saved | Core passed, lifecycle partial | Canonical `payroll:EMP7062`; OP-06 is detector-only. Reopen/CLEAR/failure-route tests remain. |
+| 7.1 | OP-07 | Employee dependencies + learning | Done | Passed | `EMP7063` final contract and seven-row replay verified after downstream rebuild. |
+| 7.2 | OP-07 | Cohort bottlenecks | Core verified | Passed core; pagination blocked | Security 14/19, complete safe metadata/evidence, four team audit rows. True result pagination remains technical debt. |
+| 7.3 | OP-07 | Manager accountability | Done | Passed + post-rebuild smoke | `EMP7009`/`CASE-73-01`: one overdue finding, eight rows, no false escalation. |
+| C.1 | OP-01 | Active-policy compatibility | Updated by teammate | Not tested | Run essential create/update/middle-band/manager-ambiguity/policy-change tests. |
+| C.2 | OP-02 | Active-policy compatibility | Updated by teammate | Not tested | Boundary `as_of_date` pair is mandatory evidence. |
+| C.3 | OP-03 | Active-policy compatibility | Updated by teammate | Not tested | Latest-score, disclosure scan, and privacy sentinel are mandatory evidence. |
+| 4.R2.1 | OP-04 | Round 2 routing/grouped cases | Saved | Partial | Compliance, payroll, unknown code, and dedup passed. All OP-07 routes and lifecycle remain. |
+| 4.R2.2 | OP-04 | Confidential independence | Not started | Not started | Required before final privacy acceptance. |
+| O.1 | ORCH-01 | Parallel fan-out/merge/handoff | Not started | Not started | Next major build after Operator regressions/routing. |
+| O.2 | ORCH-01 | Command/event correlation | Not started | Not started | Depends on O.1 and G-04. |
+| S.1 | Daily Sweep | Schedule/fan-out/cohort aggregation | Not started | Not started | Depends on ORCH-01 and verified OP-07 cohort mode. |
+| E2E | All | Live acceptance rehearsal | Not started | Not started | Policy change → Auto → OP-04 → human Workbench → Dashboard/audit evidence. |

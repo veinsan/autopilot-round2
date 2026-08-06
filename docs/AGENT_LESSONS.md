@@ -292,3 +292,62 @@ credentials or confidential payloads.
   before selecting convenience timestamps. Use only confirmed columns in live
   evidence queries.
 
+## Auto Studio live-build lessons — 2026-08-07
+
+### Diagnose planner hangs from active executions, not total history count
+
+- Mistake: treating `Total Run = 99` as evidence that the Audit Trail had hit a
+  documented hard limit, while nine executions were still marked `Running` and
+  two builder chats were stuck in repeated planning phases.
+- Prevention: inspect `Running` and `Waiting` first. If stale executions remain
+  and no teammate owns them, terminate only the active runs, confirm both counts
+  return to zero, refresh, and reopen one fresh builder chat from the last saved
+  checkpoint. Completed/cancelled history count alone is not proof of a limit.
+
+### Use one fresh builder chat and one complete step specification at a time
+
+- Mistake: opening multiple chats and asking for multi-step cohort fixes caused
+  the planner to loop through analysis without producing an executable plan.
+- Prevention: branch from the latest saved version, keep only one builder chat
+  active, rebuild one complete existing step, verify it, save a distinctly named
+  checkpoint, then open a new chat for the next step. Keep auto-fix off for
+  deterministic contract changes.
+
+### Generic finding normalization can erase valid extension fields
+
+- Mistake: the cohort detector correctly produced `team`, `affected_count`,
+  `denominator`, `percent`, and `dependency_ids`, but the downstream generic
+  normalizer reduced the finding to the common six fields and emitted empty
+  evidence, null ownership, and no recommended action.
+- Prevention: when a common envelope permits domain-specific safe metadata,
+  explicitly preserve those fields through every step. For
+  `COHORT_DEPENDENCY_BOTTLENECK`, carry cohort/team/count/denominator/percentage
+  and convert each safe dependency ID to `dependency:<id>` without dropping the
+  original team results.
+
+### Verify persistence with exact execution correlation, but account for timing
+
+- Mistake: an immediate `count(*)` query returned zero and was interpreted as a
+  failed cohort audit write, while a later time-window query showed all four
+  deterministic rows under the correct execution ID.
+- Prevention: first query the exact `execution_id`; if the result conflicts with
+  a just-finished Timeline, re-run once after completion and inspect a narrow
+  `evaluated_at` window plus the deterministic ID prefix. Never accept the UI
+  `Records Written` count by itself, but do not declare persistence failure from
+  one possibly premature read either.
+
+### Save verified intermediate contracts under new checkpoint names
+
+- Mistake: overwriting a broad verified version name with a partially changed
+  cohort contract would have made rollback and regression attribution unclear.
+- Prevention: save incremental milestones under distinct names, for example
+  `OP-07 Cohort Dependency Evidence — Verified`, then save the integrated result
+  as `OP-07 Cross-Team Readiness — Core Verified` only after downstream
+  normalization and database persistence both pass.
+
+### Prefer copied Markdown query results as verification evidence
+
+- Prevention: use Supabase's “copy as Markdown” output for multi-row evidence.
+  It preserves column names and row alignment, reduces transcription mistakes,
+  and makes deterministic IDs, outcomes, and execution correlation reviewable.
+
