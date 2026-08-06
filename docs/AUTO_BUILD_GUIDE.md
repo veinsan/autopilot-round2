@@ -651,20 +651,95 @@ Missing/zero denominator, incomplete pagination, or invalid thresholds becomes
 a system_exception. Never calculate from a partial first page.
 ```
 
-**Tests:**
+**Input contract (form test 7.2):**
 
-Field yang sama di semua baris: `scope=cohort`, `cohort=COH-2026-W22`;
-`command_id` = sama dengan `execution_id`; `trigger_source` = `command_center`;
-pin `as_of_date="2026-08-03"`.
+| Field | Wajib | Isi | Perilaku kalau kosong |
+|---|---|---|---|
+| `scope` | **Ya** | `cohort` atau `employee` | `input_validation` system_exception; tidak ada read apa pun |
+| `cohort` | Ya saat `scope=cohort` | mis. `COH-2026-W22` | `input_validation` system_exception |
+| `employee_id` | Ya saat `scope=employee` | mis. `EMP7063` | diabaikan saat `scope=cohort` |
+| `min_workers_for_bottleneck` | Tidak | integer ≥ 1 | pakai `thresholds.bottleneck_min_workers` dari policy aktif |
+| `min_percent_for_bottleneck` | Tidak | angka 0–100 | pakai `thresholds.bottleneck_min_percent` dari policy aktif |
 
-| Urutan | Scenario | execution_id | Expected output | Tindakan tambahan sebelum run |
-|---|---|---|---|---|
-| 1 | Kedua threshold lolos (policy default) | `cmd_aeea9486642a9a82056cd2fb63af451a` | `COHORT_DEPENDENCY_BOTTLENECK` untuk team Security: 14 dari 19 (~73.7%); policy default (`bottleneck_min_workers=2`, `bottleneck_min_percent=25`) sudah cukup, tanpa perlu ubah policy | Tidak ada |
-| 2 | Jumlah pekerja menekan (suppressed) | `cmd_562b0899a4903848b39e124b06f6df63` | Tidak ada bottleneck Security (14 < 15) meski persentase tetap lolos; baris `policy_evaluations` untuk team Security tetap ditulis sebagai suppressed, bukan diam-diam dilewati | Buat draft policy baru via Policy Studio dengan `bottleneck_min_workers=15`, simulate → approve → activate; setelah test, kembalikan `policy_round2_v1` sebagai active |
-| 3 | Persentase menekan (suppressed) | `cmd_0545d8219d3b9160f1d2ba7541cbc1ff` | Tidak ada bottleneck Security (73.7% < 75%) meski jumlah pekerja tetap lolos; baris `policy_evaluations` untuk team Security tetap ditulis sebagai suppressed | Buat draft policy baru via Policy Studio dengan `bottleneck_min_percent=75`, simulate → approve → activate; setelah test, kembalikan `policy_round2_v1` sebagai active |
-| 4 | Paginasi REST | `cmd_e098a82b32fb70a0f210c4927999c884` | Hasil identik dengan #1 (14 dari 19, Security bottleneck); buktikan tidak ada data yang hilang akibat membaca halaman pertama saja | Sebelum run, kecilkan sementara page size/limit REST `Cross_Team_Dependencies` di step ini (mis. `limit=5`) supaya respons kepotong jadi beberapa halaman; kembalikan ke limit asli setelah test |
+Aturan yang mengikat kedua field threshold:
 
-Setelah baris #3, pastikan `policy_round2_v1` (thresholds default: `bottleneck_min_workers=2`, `bottleneck_min_percent=25`) sudah diaktifkan kembali sebelum lanjut ke test/stage lain.
+- Kosong berarti **baca policy aktif**, bukan "pakai default hard-coded". Nilai
+  kosong tidak boleh berubah jadi 2/25 di dalam Code step.
+- Nilai yang diisi adalah **override khusus test**. Run terjadwal (`daily_schedule`)
+  dan run Command Center produksi harus mengirim kedua field ini kosong; kalau
+  terisi, Operator wajib menandai barisnya (mis. `threshold_source="input_override"`)
+  di `policy_evaluations` supaya audit tidak salah membaca hasil override sebagai
+  hasil policy aktif. Gate "Policy" di §9 hanya boleh dibuktikan lewat baris
+  #16/#17 (perubahan versi policy), bukan lewat override input.
+- Invalid = non-numerik, negatif, `min_workers=0`, atau `min_percent` di luar
+  0–100 → `system_exception`; jangan jatuh balik ke nilai policy dan jangan
+  menebak.
+- `scope=employee` mengabaikan `cohort` dan kedua threshold; jalurnya persis §7.1.
+
+**Tests — essentials (live, di Auto Studio):**
+
+Dipangkas dari 18 ke 7 baris: yang tersisa di sini adalah skenario yang
+kebenarannya bergantung pada **eksekusi nyata** (agregasi REST atas data
+sungguhan, interaksi dua threshold, filter dua kondisi bersamaan, paginasi,
+retensi lintas versi policy) — bukan cuma satu cabang early-return yang bisa
+dipastikan benar dengan membaca kondisinya di Code step. Skenario early-return
+lain ada di tabel "Cakupan tambahan lewat code review" di bawah.
+
+Field yang sama di semua baris: `command_id` = sama dengan `execution_id`;
+`trigger_source` = `command_center`; pin `as_of_date="2026-08-03"`. `—` berarti
+field dikosongkan. Denominator = jumlah worker distinct di cohort tsb pada
+`Workers` (`COH-2026-W22`=19, `W29`=17, `W17`=4, `W26`=2). Jalankan sesuai
+kolom **Urutan**: baris #7 mengubah policy yang sedang aktif, jadi ditaruh
+paling akhir.
+
+| Urutan | Scenario | scope | employee_id | cohort | min_workers | min_percent | execution_id | Expected output | Tindakan tambahan sebelum run |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Validasi input — representatif untuk seluruh keluarga early-return | `cohort` | — | — | — | — | `cmd_98723f43a527b55df346f242eb52be62` | Satu `input_validation` system_exception; **tidak ada** read Workers/Cross_Team_Dependencies sama sekali di Activity Timeline; `findings: []` | Tidak ada |
+| 2 | Baseline policy default (kedua threshold lolos) | `cohort` | — | `COH-2026-W22` | — | — | `cmd_aeea9486642a9a82056cd2fb63af451a` | Satu `COHORT_DEPENDENCY_BOTTLENECK` untuk team **Security 14/19 (73.68%)**. Team lain ditulis sebagai suppressed, bukan dihilangkan: Facilities 4/19 (21.05%), IT 3/19 (15.79%), Payroll 1/19 (5.26%) → total 4 baris `policy_evaluations` team. Output hanya berisi cohort/team/angka/dep_id — tanpa nama, komentar, atau prediksi employee | Tidak ada (policy default `bottleneck_min_workers=2`, `bottleneck_min_percent=25`) |
+| 3 | Dua band threshold dalam satu run (AND, bukan OR) | `cohort` | — | `COH-2026-W29` | — | — | `cmd_dfe4f462a6a0965a98c189c154c82a37` | Hanya Security yang fire: 5/17 (29.41%). Facilities 4/17 (23.53%) **suppressed karena persen** walau count 4 ≥ 2 — buktikan kedua threshold dievaluasi AND. IT 3/17 (17.65%) dan Payroll 1/17 (5.88%) juga suppressed | Tidak ada |
+| 4 | Boundary — tepat di ambang, inklusif | `cohort` | — | `COH-2026-W17` | `1` | `25` | `cmd_08c538b141d4d8fd6d8f71e8757ba82c` | Security **1/4 = 25.00%** fire: count `1 ≥ 1` dan persen `25.00 ≥ 25` (perbandingan harus `≥`, bukan `>`); evidence `DEP-10112` | Tidak ada |
+| 5 | Cohort bersih — filter dua kondisi bersamaan | `cohort` | — | `COH-2026-W26` | `1` | `1` | `cmd_de75c8c5850c3174014a0952037280d0` | Tidak ada finding sama sekali walau threshold dibuat serendah mungkin: `DEP-10036` Blocked tapi `blocks_day_one=false`, `DEP-10226`/`DEP-10228` `blocks_day_one=true` tapi sudah Done. Denominator tetap dilaporkan 2 (bukan exception) | Tidak ada |
+| 6 | Paginasi REST — **SKIPPED, blocked** | `cohort` | — | `COH-2026-W22` | — | — | `cmd_e098a82b32fb70a0f210c4927999c884` | Hasil identik baris #2 (Security 14/19, 4 baris team); buktikan tidak ada data hilang akibat membaca halaman pertama saja | Tidak bisa dites tanpa perubahan kode dulu: query cohort saat ini cuma chunking daftar `employee_id` untuk filter `in.()` (`chunk_size=200`), bukan paginasi hasil (`limit`/`offset`) pada `Cross_Team_Dependencies` itu sendiri — untuk 19 worker di `COH-2026-W22`, semua ID muat dalam satu chunk sehingga jadi tepat satu HTTP call tanpa `limit`/`offset` yang bisa dikecilkan. Perlu prompt fix builder dulu untuk menambah loop `limit`/`offset` yang sesungguhnya sebelum test ini bisa dijalankan |
+| 7 | Governance — suppressed tetap tercatat lintas versi policy | `cohort` | — | `COH-2026-W22` | — | — | `cmd_562b0899a4903848b39e124b06f6df63` | Tidak ada bottleneck Security (14 < 15) meski persen lolos; baris `policy_evaluations` Security tetap ditulis sebagai suppressed dan mencatat `policy_version_id` **baru** (beda dengan baris #2) | Buat draft policy baru via Policy Studio dengan `bottleneck_min_workers=15`, simulate → approve → activate; kedua field threshold di form **harus kosong**; setelah test, kembalikan `policy_round2_v1` sebagai active |
+
+Setelah baris #7, pastikan `policy_round2_v1` (thresholds default:
+`bottleneck_min_workers=2`, `bottleneck_min_percent=25`) sudah diaktifkan
+kembali, dan page size REST di baris #6 sudah dikembalikan, sebelum lanjut ke
+test/stage lain.
+
+**Cakupan tambahan lewat code review (tidak perlu live test):**
+
+Setiap baris ini adalah satu cabang early-return atau satu operator
+perbandingan yang benar/salahnya terlihat langsung dari membaca Code step —
+tidak perlu dijalankan live selama polanya sudah dibuktikan sekali di tabel
+di atas. Buka step-nya di Auto Studio dan cocokkan kondisinya satu-satu:
+
+| Skenario (dari draf 18-baris sebelumnya) | Yang dicek di Code step |
+|---|---|
+| `scope` kosong | Cabang scope kosong/tidak dikenal mengembalikan `system_exception` sebelum read apa pun — pola sama seperti baris #1 di atas, hanya beda field yang kosong |
+| Cohort tidak dikenal (denominator 0) | Ada guard eksplisit `denominator == 0 → system_exception` sebelum divisi persentase mana pun |
+| `scope=employee` — cohort/threshold diabaikan | Cabang `scope=employee` memanggil ulang jalur §7.1 dan tidak menyentuh variabel `cohort`/threshold sama sekali |
+| `employee_id` tidak mempersempit denominator saat `scope=cohort` | Query Workers/Cross_Team_Dependencies pada cabang cohort tidak difilter oleh `employee_id` |
+| Boundary — hanya count yang menekan | Operator perbandingan count memakai `≥` yang sama dengan yang sudah diverifikasi di baris #4 |
+| Boundary — hanya persen yang menekan | Operator perbandingan persen memakai `≥` yang sama dengan yang sudah diverifikasi di baris #4 |
+| Cohort kecil (mis. W20) tetap dihitung apa adanya | Tidak ada special-case ukuran cohort minimum di logika agregasi — jalur sama seperti baris #2/#3 |
+| `min_workers=0` ditolak | Validasi numerik mensyaratkan `>= 1`, bukan cuma `>= 0` |
+| Threshold non-numerik/negatif | Ada type-check + sign-check eksplisit sebelum threshold dipakai, tanpa fallback diam-diam ke nilai policy |
+| `min_percent` di luar 0–100 | Ada range-check `0 <= x <= 100` eksplisit, terpisah dari validasi `min_workers` |
+| Governance — persen ditekan lewat versi policy | Cabang override policy untuk `bottleneck_min_percent` memakai jalur kode yang **sama persis** dengan `bottleneck_min_workers` yang sudah diverifikasi di baris #7 (baca `policy_version_id` baru, tulis baris suppressed) — bukan jalur terpisah yang bisa diam-diam berbeda |
+
+Kalau salah satu baris di tabel code-review ini ternyata punya cabang kode
+yang **berbeda struktur** dari yang sudah live-tested (bukan sekadar field
+yang berbeda), naikkan lagi jadi live test — pemangkasan ini valid hanya
+selama pola kodenya benar-benar seragam.
+
+Semua angka cohort di atas dihitung dari `dataset/csv/Workers.csv` +
+`dataset/csv/Cross_Team_Dependencies.csv` dengan aturan blocker yang sama
+seperti §7.1 (`blocks_day_one=true` dan status bukan Done/Completed/Complete/
+Fulfilled). Kalau dataset live pernah diubah oleh fixture stage lain (mis.
+`DEP-10015` di §6 4.R2.2 atau dependency `EMP7063` di §6 4.R2.1 test #16),
+kembalikan dulu ke kondisi awal sebelum menjalankan tabel ini — kalau tidak,
+denominator dan angka team di atas tidak akan cocok.
 
 ### 7.3 — Manager accountability state machine (G-03 required)
 
@@ -712,30 +787,147 @@ Return safe findings and log policy evaluations. Never label an individual as
 disengaged, negligent, or likely to resign.
 ```
 
-**Tests:**
+**Signature RPC `record_manager_action_event` (terverifikasi live):**
 
-Catatan: INPUT contract persis untuk 7.3 (scope per-case vs. scan-all) belum
-final karena stage ini belum di-build di Auto Studio. Tabel di bawah
-mengasumsikan `scope=employee` seperti 7.1 (`employee_id`, `execution_id`,
-`command_id`=`execution_id`, `trigger_source=command_center`, pin
-`as_of_date="2026-08-03"`) — sesuaikan begitu prompt di atas benar-benar
-di-paste dan kontrak inputnya dikonfirmasi. Setiap baris butuh fixture di
-`workbench_cases` + `manager_action_states` lebih dulu (lihat kolom terakhir);
-`record_manager_action_event` adalah RPC yang sudah ada di schema, dipanggil
-lewat `POST {SUPABASE_URL}/rest/v1/rpc/record_manager_action_event` atau
-langsung `select` di SQL editor.
+```text
+record_manager_action_event(
+  target_case_id            text,
+  new_source_event_id       text,
+  new_event_type            text,
+  event_occurred_at         timestamptz,
+  new_next_reminder_at      timestamptz DEFAULT NULL,
+  new_acknowledgment_deadline timestamptz DEFAULT NULL,
+  new_action_deadline       timestamptz DEFAULT NULL
+)
+```
 
-| Urutan | Scenario | employee_id | execution_id | Expected output | Fixture (jalankan sebelum run) |
-|---|---|---|---|---|---|
-| 1 | Delivered, ack deadline lewat, belum ack | `EMP7009` | `cmd_7f0cc415af8c17ab878cf27d6a2188e4` | `MANAGER_ACKNOWLEDGMENT_OVERDUE` untuk `CASE-73-01` | `insert into "workbench_cases" (case_id, employee_id, case_type, priority, status) values ('CASE-73-01','EMP7009','dependency','high','open');`<br>`select record_manager_action_event('CASE-73-01','EVT-73-01-1','nudge_created','2026-07-28T00:00:00Z','2026-07-30T00:00:00Z','2026-07-30T00:00:00Z','2026-08-09T00:00:00Z');`<br>`select record_manager_action_event('CASE-73-01','EVT-73-01-2','delivery_succeeded','2026-07-28T00:05:00Z');` |
-| 2 | Delivered, ack eksplisit sebelum deadline | `EMP7010` | `cmd_2c07d2b4d1efa22ee9c7c011d721ddc5` | Tidak ada `MANAGER_ACKNOWLEDGMENT_OVERDUE`/`MANAGER_ACTION_OVERDUE` untuk `CASE-73-02` | Sama seperti #1 tapi `case_id='CASE-73-02'`, `employee_id='EMP7010'`; tambahkan `select record_manager_action_event('CASE-73-02','EVT-73-02-3','acknowledged','2026-07-29T10:00:00Z');` (sebelum ack_deadline `2026-07-30`) |
-| 3 | Acknowledged, action deadline lewat, belum verified | `EMP7011` | `cmd_cc182b53292944234ae6d25fb9e06ad9` | `MANAGER_ACTION_OVERDUE` untuk `CASE-73-03` | `insert workbench_cases` case `CASE-73-03`/`EMP7011`; `record_manager_action_event('CASE-73-03','EVT-73-03-1','nudge_created','2026-07-20T00:00:00Z','2026-07-22T00:00:00Z','2026-07-22T00:00:00Z','2026-07-27T00:00:00Z')`; `..., 'EVT-73-03-2','delivery_succeeded','2026-07-20T00:05:00Z'`; `..., 'EVT-73-03-3','acknowledged','2026-07-21T09:00:00Z'` (sebelum ack_deadline) |
-| 4 | Kegagalan pengiriman (Slack) | `EMP7012` | `cmd_fb20f732bafeb2f08de2b149f806de57` | Satu operational `system_exception` (`MANAGER_NOTIFICATION_DELIVERY_FAILED`); `successful_reminder_count` tetap 0; state tetap `nudge_created` (bukan `delivered`) | `insert workbench_cases` case `CASE-73-04`/`EMP7012`; `record_manager_action_event('CASE-73-04','EVT-73-04-1','nudge_created','2026-07-30T00:00:00Z','2026-08-01T00:00:00Z','2026-08-02T00:00:00Z','2026-08-07T00:00:00Z')`; `..., 'EVT-73-04-2','delivery_failed','2026-07-30T00:10:00Z'` |
-| 5 | Duplicate delivery event (replay) | `EMP7014` | `cmd_9adcf263d019ff409b823af8680a3d57` | Satu transisi state (`delivered`), `successful_reminder_count=1` (bukan 2) setelah event yang sama dikirim dua kali | `insert workbench_cases` case `CASE-73-05`/`EMP7014`; `record_manager_action_event('CASE-73-05','EVT-73-05-1','nudge_created','2026-07-25T00:00:00Z','2026-07-27T00:00:00Z','2026-07-27T00:00:00Z','2026-08-01T00:00:00Z')`; jalankan `..., 'EVT-73-05-2','delivery_succeeded','2026-07-25T00:05:00Z'` **dua kali persis** (source_event_id sama) |
-| 6 | Case payroll dikecualikan | `EMP7015` | `cmd_292cf2a30c60fb2c64fdc82d55f57262` | Tidak ada finding manager apa pun untuk `CASE-73-06` walau ack deadline sudah lewat — dikecualikan karena `case_type='payroll'` | `insert into "workbench_cases" (case_id, employee_id, case_type, priority, status) values ('CASE-73-06','EMP7015','payroll','high','open');` lalu fixture ack-overdue sama seperti #1 dengan `case_id='CASE-73-06'` |
-| 7 | Peakon bukan sumber otoritatif | `EMP7013` | `cmd_1dd7cddec3436f55d144825585622798` | Tidak ada finding manager-overdue; `Peakon_Engagement.manager_response_days=6` milik `EMP7013` (`PK-5032`) tidak boleh dipakai sebagai bukti | Tidak ada — jangan buat baris `manager_action_states` untuk `EMP7013` sama sekali |
+PostgREST mencocokkan RPC lewat **nama** argumen di body JSON, bukan posisi.
+Panggilan escalation dari Auto karena itu harus memakai persis
+`{"target_case_id": ..., "new_source_event_id": ..., "new_event_type": "escalated",
+"event_occurred_at": ...}`; tiga argumen terakhir punya default dan boleh
+dihilangkan. Nama yang meleset menghasilkan `PGRST202` (fungsi tidak ditemukan),
+bukan pemanggilan dengan nilai default — jadi kegagalannya total dan senyap dari
+sisi logic. Fixture di SQL Editor memanggil fungsi yang sama secara posisional,
+dengan urutan timestamp `event_occurred_at`, `next_reminder_at`,
+`acknowledgment_deadline`, `action_deadline`.
 
-Setelah selesai, hapus semua fixture test (`delete from "manager_action_events" where case_id like 'CASE-73-%'; delete from "manager_action_states" where case_id like 'CASE-73-%'; delete from "workbench_cases" where case_id like 'CASE-73-%';` — urutan ini penting karena foreign key).
+Pengecualian payroll ditegakkan **di dalam RPC itu sendiri**, bukan hanya oleh
+filter query Auto: memanggil `record_manager_action_event` untuk case dengan
+`case_type='payroll'` gagal dengan `P0001: Payroll case cannot enter manager
+action state`. Filter `workbench_cases.case_type=not.in.(payroll,confidential)`
+di Operator tetap wajib sebagai lapisan kedua, tetapi kombinasi terlarangnya
+tidak bisa dibuat lewat jalur normal (lihat fixture test #3 di bawah).
+
+**Input contract (form test 7.3):**
+
+Field test form OP-07 ternyata satu form yang sama dipakai lintas 7.1/7.2/7.3
+(bukan form terpisah per bagian) — jadi field cohort/threshold dari §7.2 juga
+muncul di sini, ditambah satu field baru khusus 7.3:
+
+| Field | Wajib | Diisi dengan apa untuk test ini | Perilaku kalau kosong/tidak diisi |
+|---|---|---|---|
+| `scope` | **Ya — dropdown, hanya 2 pilihan** | Pilih `employee` atau `cohort` dari dropdown. Tidak ada opsi lain, tidak ada opsi kosong — form tidak bisa disubmit tanpa memilih salah satu | **Tidak reachable.** UI memaksa salah satu dari dua nilai; tidak ada "scope kosong" atau "scope invalid" yang bisa dikirim lewat form test ini (beda dari asumsi saya sebelumnya) |
+| `employee_id` | Ya saat `scope=employee`, diabaikan saat `scope=cohort` | Ketik ID pekerja persis, mis. `EMP7009` (lihat kolom employee_id di tabel test) | Kosongkan field ini kalau `scope=cohort` dipilih. Kalau `scope=employee` dipilih tapi ini dikosongkan → `input_validation` system_exception |
+| `cohort_id` | Ya saat `scope=cohort`, diabaikan saat `scope=employee` | Ketik ID cohort, mis. `COH-2026-W22` | Kosongkan kalau `scope=employee` dipilih. Field ini **tidak dibaca** oleh logic manager-accountability sama sekali — cuma dipakai Day-1/cohort-bottleneck yang jalan bersamaan di pipeline yang sama |
+| `min_workers_for_bottleneck` | Tidak, milik logic §7.2 | Kosongkan di semua test §7.3 | Kosong = pakai default policy aktif untuk logic bottleneck; **tidak berpengaruh sama sekali** ke evaluasi manager-accountability |
+| `min_percent_for_bottleneck` | Tidak, milik logic §7.2 | Kosongkan di semua test §7.3 | Sama seperti `min_workers_for_bottleneck` |
+| `manager_max_reminders` | Tidak | Ketik angka integer, mis. `1`, untuk override cap reminder khusus test ini (lihat test #4). Kosongkan di semua test lain | Kosong = pakai `thresholds.manager_max_reminders` dari policy aktif (default `2`) |
+
+Karena `scope` ternyata dropdown wajib 2-pilihan, test "scope kosong/invalid"
+tidak bisa dijalankan lewat form ini sama sekali. Cabang defensif
+`if scope not in ["employee","cohort"]:` di kode tetap dipertahankan untuk
+jaga-jaga kalau OP-07 dipanggil bukan lewat form ini (mis. langsung dari
+ORCH-01) — itu masuk code review, bukan test live.
+
+**Tests — essentials (live, di Auto Studio):**
+
+Dipangkas dari 10 ke 4 baris: yang tersisa hanyalah skenario yang kebenarannya
+bergantung pada **eksekusi nyata** — rantai empat step benar-benar tersambung,
+filter embed PostgREST benar-benar menyaring, dan RPC escalation benar-benar
+tertulis. Sisanya adalah cabang cermin atau kasus negatif yang bisa dipastikan
+dari membaca kondisinya; lihat tabel "Cakupan tambahan lewat code review" di
+bawah.
+
+Field yang sama di semua baris: `scope=employee`; `cohort_id`,
+`min_workers_for_bottleneck`, dan `min_percent_for_bottleneck` dikosongkan;
+`command_id` = sama dengan `execution_id`; `trigger_source = command_center`;
+pin `as_of_date="2026-08-03"`. `—` berarti field dikosongkan di form.
+Jalankan sesuai kolom **Urutan** — baris #4 mengubah state (`escalated`), jadi
+ditaruh paling akhir.
+
+**Prasyarat sebelum fixture dijalankan.** Konfirmasi relasi foreign key yang
+dipakai embed `workbench_cases!inner(...)`; kalau query ini tidak
+mengembalikan baris, step manager akan balas 400 dan test #3 gagal karena
+alasan yang salah:
+
+```sql
+select conname, conrelid::regclass, confrelid::regclass
+from pg_constraint
+where contype = 'f' and conrelid = 'manager_action_states'::regclass;
+```
+
+Pastikan juga `thresholds.manager_max_reminders` di policy aktif bernilai `2`.
+Kalau lebih rendah, escalation ikut terpicu di baris #1/#2 dan hasilnya tidak
+akan cocok dengan tabel.
+
+Kolom **Fixture** hanya berisi statement SQL yang bisa langsung dieksekusi di
+SQL Editor Supabase.
+
+| Urutan | Scenario | employee_id | manager_max_reminders | execution_id | Expected output | Fixture (SQL Editor) |
+|---|---|---|---|---|---|---|
+| 1 | Rantai empat step + ack deadline lewat | `EMP7009` | — | `cmd_7f0cc415af8c17ab878cf27d6a2188e4` | Tepat satu finding: `MANAGER_ACKNOWLEDGMENT_OVERDUE`, evidence `case:CASE-73-01`. Tidak ada `DAY_ONE_DEPENDENCY_BLOCKED` (keempat dependency `blocks_day_one=false`) dan tidak ada `LEARNING_MILESTONE_OVERDUE` (`LRN-30028`/`LRN-30029`/`LRN-30030` semuanya Completed) — jadi finding tunggal ini membuktikan step manager benar-benar dieksekusi dan output-nya sampai ke Write Evaluation. Tidak ada escalation: `successful_reminder_count(1) < manager_max_reminders(2)` | `insert into "workbench_cases" (case_id, employee_id, case_type, priority, status) values ('CASE-73-01','EMP7009','dependency','high','open');`<br>`select record_manager_action_event('CASE-73-01','EVT-73-01-1','nudge_created','2026-07-28T00:00:00Z','2026-07-30T00:00:00Z','2026-07-30T00:00:00Z','2026-08-09T00:00:00Z');`<br>`select record_manager_action_event('CASE-73-01','EVT-73-01-2','delivery_succeeded','2026-07-28T00:05:00Z');` |
+| 2 | Duplicate delivery event (replay) — idempotensi RPC | `EMP7014` | — | `cmd_9adcf263d019ff409b823af8680a3d57` | `successful_reminder_count=1` (bukan 2) walau event yang sama dikirim dua kali; step evaluasi membaca nilai itu apa adanya tanpa menghitung ulang. Findings: `MANAGER_ACKNOWLEDGMENT_OVERDUE` (`case:CASE-73-05`, ack_deadline `2026-07-27` sudah lewat) dan `DAY_ONE_DEPENDENCY_BLOCKED` (`DEP-10060`). Tidak ada `LEARNING_MILESTONE_OVERDUE`. Tidak ada escalation: `1 < 2` | `insert into "workbench_cases" (case_id, employee_id, case_type, priority, status) values ('CASE-73-05','EMP7014','dependency','high','open');`<br>`select record_manager_action_event('CASE-73-05','EVT-73-05-1','nudge_created','2026-07-25T00:00:00Z','2026-07-27T00:00:00Z','2026-07-27T00:00:00Z','2026-08-01T00:00:00Z');`<br>`select record_manager_action_event('CASE-73-05','EVT-73-05-2','delivery_succeeded','2026-07-25T00:05:00Z');`<br>`select record_manager_action_event('CASE-73-05','EVT-73-05-2','delivery_succeeded','2026-07-25T00:05:00Z');`<br>`select case_id, current_state, successful_reminder_count from manager_action_states where case_id = 'CASE-73-05';` |
+| 3 | Case payroll dikecualikan oleh filter embed | `EMP7015` | — | `cmd_292cf2a30c60fb2c64fdc82d55f57262` | **Tidak ada** finding `MANAGER_*` sama sekali untuk `CASE-73-06` walau ack_deadline `2026-07-30` sudah lewat — disaring oleh `workbench_cases.case_type=not.in.(payroll,confidential)`. Tetap ada `LEARNING_MILESTONE_OVERDUE` dengan `LRN-30046` (due `2026-07-06`) dan `LRN-30047` (due `2026-07-29`) — buktikan pengecualian hanya berlaku untuk logic manager, bukan Learning Logic. Tidak ada Day-1 blocker | `insert into "workbench_cases" (case_id, employee_id, case_type, priority, status) values ('CASE-73-06','EMP7015','dependency','high','open');`<br>`select record_manager_action_event('CASE-73-06','EVT-73-06-1','nudge_created','2026-07-28T00:00:00Z','2026-07-30T00:00:00Z','2026-07-30T00:00:00Z','2026-08-09T00:00:00Z');`<br>`select record_manager_action_event('CASE-73-06','EVT-73-06-2','delivery_succeeded','2026-07-28T00:05:00Z');`<br>`update "workbench_cases" set case_type = 'payroll' where case_id = 'CASE-73-06';` |
+| 4 | `manager_max_reminders` override + escalation lewat RPC | `EMP7016` | `1` | `cmd_6a8e0c55a29bd083d1d604e497538fb2` | Tiga finding: `MANAGER_ACKNOWLEDGMENT_OVERDUE` (`case:CASE-73-07`), `LEARNING_MILESTONE_OVERDUE` (`LRN-30049`, due `2026-05-17`), `DAY_ONE_DEPENDENCY_BLOCKED` (`DEP-10066`, `DEP-10068`). Karena `successful_reminder_count(1) >= manager_max_reminders(1)` dan `current_state != 'escalated'`, step memanggil RPC dan `manager_action_states.current_state` untuk `CASE-73-07` berubah jadi `escalated` dengan `escalated_at` terisi. Bandingkan dengan baris #1 (field dikosongkan → cap policy `2` → `1 < 2` → tidak escalate) untuk membuktikan override benar-benar dipakai | `insert into "workbench_cases" (case_id, employee_id, case_type, priority, status) values ('CASE-73-07','EMP7016','dependency','high','open');`<br>`select record_manager_action_event('CASE-73-07','EVT-73-07-1','nudge_created','2026-07-20T00:00:00Z','2026-07-22T00:00:00Z','2026-07-22T00:00:00Z','2026-07-27T00:00:00Z');`<br>`select record_manager_action_event('CASE-73-07','EVT-73-07-2','delivery_succeeded','2026-07-20T00:05:00Z');` |
+
+Fixture baris #3 sengaja membuat case sebagai `dependency` lebih dulu, baru
+mengubah `case_type` jadi `payroll` sesudah state terbentuk. Membuatnya
+langsung sebagai `payroll` mustahil: RPC menolak dengan `P0001: Payroll case
+cannot enter manager action state`. Kombinasi terlarang itu hanya bisa
+dikonstruksi lewat pintu belakang ini, dan justru itu yang membuat test-nya
+bermakna — ia menguji lapisan filter di Operator, bukan lapisan penjagaan di
+RPC yang sudah terbukti sendiri.
+
+Verifikasi setelah keempat baris selesai:
+
+```sql
+select case_id, current_state, successful_reminder_count, escalated_at
+from manager_action_states where case_id like 'CASE-73-%' order by case_id;
+```
+
+`CASE-73-07` harus `current_state='escalated'` dengan `escalated_at` terisi;
+tiga case lain tetap `delivered` dengan `escalated_at` null.
+
+```sql
+select evaluation_id, execution_id, employee_id, policy_key, outcome
+from policy_evaluations
+where employee_id in ('EMP7009','EMP7014','EMP7015','EMP7016')
+order by evaluated_at desc;
+```
+
+`execution_id` harus terisi (bukan `unknown_execution`), `policy_key` bervariasi
+per rule, dan baris CLEAR ikut tercatat.
+
+Setelah selesai, hapus semua fixture test — urutan ini penting karena foreign
+key — lalu kembalikan `policy_round2_v1` (`as_of_date=null`) sebagai versi
+aktif:
+
+```sql
+delete from "manager_action_events" where case_id like 'CASE-73-%';
+delete from "manager_action_states" where case_id like 'CASE-73-%';
+delete from "workbench_cases" where case_id like 'CASE-73-%';
+```
+
+**Cakupan tambahan lewat code review (tidak perlu live test):**
+
+| Skenario (dari draf 10-baris sebelumnya) | Yang dicek di Code step |
+|---|---|
+| `scope=cohort` — manager-accountability skip | Cabang `if scope == "cohort" or not worker_context` mengembalikan state apa adanya sebelum read apa pun; sudah terbukti berjalan setiap kali §7.2 dijalankan |
+| Delivered, ack eksplisit sebelum deadline | Syarat `current_state == 'delivered' and not acknowledged_at` — cabang yang sama dengan baris #1, hanya beda nilai data |
+| Acknowledged, action deadline lewat | Blok `current_state == 'acknowledged' and not action_verified_at` memakai operator perbandingan identik dengan blok ack yang sudah diverifikasi di baris #1 |
+| Case macet di `nudge_created` | Tidak ada cabang yang menangani `current_state == 'nudge_created'`, jadi outcome tetap `clear` — terbaca langsung dari struktur if |
+| Peakon bukan sumber otoritatif | Tidak ada satu pun referensi ke `Peakon_Engagement` di seluruh step; buktinya adalah ketiadaan kode, bukan hasil run |
+| Field cohort/threshold diabaikan saat `scope=employee` | `cohort_id` dan kedua threshold hanya dibaca di cabang `scope == "cohort"` pada step Day-1 |
 
 ## 5. OP-01/02/03 — Active-policy compatibility amendment
 
@@ -1079,7 +1271,7 @@ sebagai evidence, bukan centang tanpa bukti.
 | Workbench | Exception nyata dibuat, di-claim/acknowledge, dan di-resolve manusia; recurring risk reopen bukan duplikat | §6.3 test #1 (create) + §OP-04 4.R2.1 test #15 (reopen setelah resolve) | Tambahan manual: buka Command Center Workbench, klik claim → resolve satu case nyata (bukan lewat SQL) untuk bukti UI manusia benar-benar berfungsi |
 | Integrations | Supabase REST + Slack native + Typeform native polling, ketiganya live | §5 OP-01 test (Typeform submission nyata); §6 4.R2.1 test #8/#9 (Slack ke Day-1/manager route); semua test Supabase REST di seluruh guide | Konfirmasi Slack benar-benar terkirim ke channel (bukan cuma tercatat di `Cases_Audit_Log`) untuk minimal satu test |
 | Privacy | Sentinel confidential dan payroll tidak muncul di dashboard/queue standar/event/log/response/pesan | §6.1 test #3 (`PAYROLL_SECRET_XYZ`); §5 OP-03 test #4 (`SENTINEL_HEALTH_XYZ`); §6 4.R2.2 test (`SENTINEL_SECRET_HEALTH_XYZ`) | Tidak ada, tiga ini sudah cukup mewakili payroll + confidential |
-| Idempotency | Retry `execution_id`/source event yang sama tidak menduplikasi evaluasi/case/state/notifikasi | §5.2 test #7 (duplicate delivery OP-05); §6.2 test #4; §7.3 test #5 (duplicate delivery manager event); ORCH-01 O.1 test #3, O.2 test #2 | Tidak ada, sudah cukup lintas 4 layer berbeda (policy_evaluations, workbench_cases, manager_action_states, workflow_events) |
+| Idempotency | Retry `execution_id`/source event yang sama tidak menduplikasi evaluasi/case/state/notifikasi | §5.2 test #7 (duplicate delivery OP-05); §6.2 test #4; §7.3 test #2 (duplicate delivery manager event, `successful_reminder_count` tetap 1); ORCH-01 O.1 test #3, O.2 test #2 | Tidak ada, sudah cukup lintas 4 layer berbeda (policy_evaluations, workbench_cases, manager_action_states, workflow_events) |
 | Degraded mode | Satu kegagalan Operator/integrasi jadi system_exception yang kelihatan, branch lain tetap jalan | ORCH-01 O.1 test #2; §5.3 test #1–#3; §6.3 test #8 | Tidak ada |
 | Generality | Logika rule-based, dipakai di banyak employee/cohort; tidak ada perilaku yang di-hardcode ke satu fixture ID | Seluruh guide sudah memakai >20 `employee_id` berbeda (`EMP7000`–`EMP7147`) lintas §5–§8 plus `COH-2026-W22` | Tidak ada — kalau reviewer minta bukti tambahan, tunjuk baris-baris test di §2–§8 sebagai daftar |
 
@@ -1102,8 +1294,8 @@ is not evidence.
 | 6.2 | OP-06 | Payroll rules + logs | Build/test | Verify persisted log | 6.1 | Done | Passed (8/8) | All tests passed including 7a/7b (policy-version-aware cutoff). Found and fixed a classification bug: pending/unconfirmed/blank status before cutoff fell through to the catch-all `else` and raised `data-quality system_exception` instead of CLEAR — the branching never handled "recognized status, cutoff not yet passed." |
 | 6.3 | OP-06/OP-04 | Restricted payroll case route | Build after gate | Prove G-02 | G-02, 6.2 | Ready after 6.2 | Not started | G-02 is satisfied; do not bypass the restricted route |
 | 7.1 | OP-07 | Dependencies + learning | Build/test | Fixture support | G-01 | Saved | Not started | Initial employee-mode workflow saved; dependency, learning, and privacy tests pending. |
-| 7.2 | OP-07 | Cohort bottlenecks | Build/test | Verify API parity | 7.1 | Not started | Not started | |
-| 7.3 | OP-07 | Manager state machine | Build after gate | Prove G-03 | G-03, 7.1 | Ready after 7.1 | Not started | G-03 is satisfied; do not infer from Peakon |
+| 7.2 | OP-07 | Cohort bottlenecks | Build/test | Verify API parity | 7.1 | Saved | Passed (6/7; #6 skipped, blocked) | Tests #1–#5 and #7 passed against real cohort data (`COH-2026-W22`, `W29`, `W17`, `W26`). Test #6 (pagination) cannot run yet: the cohort branch chunks `employee_id` for the `in.()` filter (`chunk_size=200`) but has no result-page `limit`/`offset` loop on `Cross_Team_Dependencies` itself, so there is nothing to shrink without a code change first. |
+| 7.3 | OP-07 | Manager state machine | Build/test | Prove G-03 | G-03, 7.1 | Done | Passed (4/4 live; 6 covered by code review) | Pipeline OP-07 kini 4 step: Day-1 Readiness → Learning → Manager Accountability → Write Evaluation. Empat test esensial lolos (`EMP7009`, `EMP7014`, `EMP7015`, `EMP7016`); escalation menulis lewat RPC dan `CASE-73-07` berpindah ke `escalated`. Bug yang ditemukan dan diperbaiki sepanjang build: step Manager Accountability belum pernah ada dan Write Evaluation membaca output Learning (rantai putus); payload RPC memakai nama argumen yang tidak ada (`case_id`/`new_state`/`event_timestamp` alih-alih `target_case_id`/`new_event_type`/`event_occurred_at`); escalation digerbangi kondisi overdue padahal cap reminder bersifat independen; `reasons` berisi kalimat, bukan reason code; `execution_id` tidak pernah ditulis ke `policy_evaluations`; `Learning_Milestones` di-query dengan kolom `id`/`milestone_name` yang tidak ada |
 | C.1 | OP-01 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Not started | Not started | |
 | C.2 | OP-02 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Not started | Not started | |
 | C.3 | OP-03 | Active-policy compatibility | Build/privacy regression | Verify policy log | G-01 | Not started | Not started | |
