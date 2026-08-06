@@ -936,73 +936,265 @@ saved Operator and rerun its Stage 1 regression suite before publishing.
 
 **Prompt for OP-01, OP-02, and OP-03 (paste into each Operator separately):**
 
+Bagian STEP 1–7 identik untuk ketiganya. Blok "PER-OPERATOR KEYS" di bawahnya
+berbeda per Operator — sertakan hanya blok milik Operator yang sedang dimigrasi.
+
 ```text
 Goal: migrate this existing Operator from legacy policy_config reads to the one
 active versioned policy without changing its already-tested business behavior.
 
 Continue the current saved Operator. Do not create a replacement workflow.
 
-1. At the start, GET policy_versions where status=active, selecting only
-   version_id, config_snapshot, activated_at, limit 2. Require exactly one row.
-2. Read the same existing threshold/normalization/routing value from the
-   equivalent location inside config_snapshot. Do not read a draft and do not
-   combine values from legacy policy_config with the active version.
-3. Preserve existing reason codes, deterministic Code steps, input/output fields,
-   Typeform single-submission behavior, and confidentiality rules.
-4. Add policy_version_id and evaluated_at to the safe output. Preserve the
-   existing legacy reasons projection expected by ORCH-01.
-5. For every rule decision, upsert an idempotent policy_evaluations row using the
-   common safe logging contract, including CLEAR outcomes. OP-01 normalization
-   and dedup decisions log only safe field/rule identifiers, never form prose.
-6. Missing active policy/key creates a system_exception and stops the affected
-   decision. Never fall back silently to legacy policy_config.
+STEP 1 — Active policy.
+- GET policy_versions where status=active, selecting only version_id,
+  config_snapshot, activated_at, limit 2. Require exactly one row; zero or more
+  than one is a system_exception that stops the evaluation.
+- Read every value this Operator needs from that config_snapshot. Do not read a
+  draft, and do not combine any value from legacy policy_config with the active
+  version. After this migration the Operator must not read policy_config at all.
+- A threshold may be a bare number or an object keyed by jurisdiction with an
+  explicit "default". Use the exact jurisdiction override when present, otherwise
+  the explicit default. A missing, non-numeric, or negative value is a
+  system_exception — never invent a fallback.
+
+STEP 2 — as_of and local calendar day.
+- Resolve as_of from config_snapshot.as_of_date when it is non-empty, otherwise
+  the current instant. Do not read the system clock when as_of_date is set: the
+  regression tests pin this field, and an Operator that ignores it will return
+  identical results for two deliberately different dates.
+- Every deadline or overdue comparison uses the worker's jurisdiction-local
+  calendar day, resolved by the common rule: take Workers.jurisdiction, query
+  Locations_Entities by it, require all matching rows to agree on one valid
+  timezone, otherwise fall back to Workers.time_zone only when it is non-empty
+  and valid. A missing, invalid, or conflicting mapping is a data-quality
+  system_exception — never guess from the free-text Location label, and never
+  default to UTC.
+
+STEP 3 — Preserve existing behaviour.
+- Keep the existing reason codes, deterministic Code steps, input and output
+  fields, Typeform single-submission behaviour, tier aggregation, confidence
+  values, and confidentiality rules exactly as they are. This is a migration of
+  where values are read from, not a change to what the rules decide.
+
+STEP 4 — Safe output envelope.
+- Add policy_version_id and evaluated_at to the safe output.
+- reasons is ONLY the sorted, de-duplicated projection of the finding reason
+  codes — a list of code strings such as ["MISSING_DAY_ONE_ACCESS"]. It must
+  contain no sentences, no formatted text, and no form prose, because ORCH-01
+  and OP-04 dispatch on the code. If the Round 1 projection currently emits
+  descriptive text, replace it with codes and move the text to the rendered
+  output only.
+- Never place an upstream API response body, a stack trace, a credential, or
+  form prose into the output, an event, a case, or a log line.
+
+STEP 5 — Idempotent evaluation logging.
+- For every rule decision, upsert one policy_evaluations row, including CLEAR
+  outcomes.
+- Populate the execution_id column on every record from the incoming
+  execution_id.
+- Build evaluation_id deterministically from execution_id + operator_id +
+  policy_version_id + object_type + object_id + rule_key. Omitting execution_id
+  makes two different runs collide on the same evaluation_id so the later run
+  silently overwrites the earlier one — that is not idempotency.
+- Set policy_key to the rule_key of that specific row, not to a single
+  Operator-wide constant, so different rules stay distinguishable in the audit
+  log.
+- POST to /rest/v1/policy_evaluations?on_conflict=evaluation_id with the header
+  Prefer: resolution=merge-duplicates and a bare JSON array body.
+- OP-01 normalization and dedup decisions log only safe field and rule
+  identifiers, never submitted form prose.
+
+STEP 6 — Failure behaviour.
+- A missing active policy or a missing required policy key creates a
+  system_exception and stops the affected decision. Never fall back silently to
+  legacy policy_config.
+- Never use raise or allow an unhandled exception to end the step. Every early
+  return for invalid input, missing data, or a failed read must assign the
+  step's output variable with the safe envelope BEFORE returning, otherwise the
+  structured exception is built and then discarded, and the caller sees a raw
+  crash instead.
+- A failed policy_evaluations write uses the active retry profile; after
+  exhaustion add an integration-failure system_exception and still return the
+  already-computed findings. Never claim the write succeeded.
+
+STEP 7 — Verify the migration is real.
+- After the change, confirm no code path still reads policy_config, and that the
+  Operator's output and its policy_evaluations rows both carry the same
+  policy_version_id as the row read in STEP 1.
+```
+
+**PER-OPERATOR KEYS — sertakan hanya blok Operator yang sedang dimigrasi:**
+
+```text
+PER-OPERATOR KEYS (OP-01 Intake & Normalization):
+Read the fuzzy-dedup band thresholds and the normalization settings from
+config_snapshot. The Round 1 behaviour is: score >= upper band updates the
+existing worker, score < lower band creates a new worker, and a score between
+the two bands escalates intake_possible_duplicate without deciding either way.
+Both band values must come from the active policy — do not hardcode 0.90 or
+0.70 anywhere in the Code step. If either key is absent from config_snapshot,
+emit a system_exception rather than assuming the Round 1 numbers.
+```
+
+```text
+PER-OPERATOR KEYS (OP-02 Onboarding & Provisioning Risk):
+Read thresholds.task_stalled_overdue_days and the provisioning grace threshold
+from config_snapshot.
+Read thresholds.compliance_step_terms as the configurable term list used to
+recognise a compliance step by name (ADR-016). Never match compliance steps with
+a hardcoded substring: the dataset contains at least two distinct step names
+("Compliance Document signed" and "Compliance training assigned") and both must
+be recognised through that list.
+Keep tier aggregation advisory and unchanged: 0 reasons LOW, 1 MEDIUM, 2 or more
+HIGH. Zero source rows still returns data_state "no_data_yet", not an error.
+Keep confidence fixed at 1.0 — every rule here is a deterministic data check.
+```
+
+```text
+PER-OPERATOR KEYS (OP-03 Engagement & Disclosure):
+Read thresholds.engagement_low_score and
+thresholds.disclosure_classifier_min_confidence from config_snapshot.
+Rule 1 compares the MOST RECENT survey score against engagement_low_score —
+order the responses by milestone (Day 7, Day 30, Day 60, Day 90) and take the
+last one. Do not use the lowest score, the average, or whichever row the query
+happened to return first.
+Rule 2 (SURVEY_NON_RESPONSE) was never implemented in Round 1 and stays out of
+scope; do not add it during this migration.
+Rule 3 keeps the existing LLM classifier and must continue to classify every
+comment available for the worker, not only the most recent one — a disclosure in
+an earlier survey must not be hidden by a later routine comment.
+Confidentiality is unchanged: reasons[] carries only the generic
+SENSITIVE_DISCLOSURE_DETECTED code, and the comment text stays inside
+_internal_case_payload, never in reasons[], the standard output, an event, or a
+log line.
 ```
 
 **Regression tests:**
 
-Catatan: OP-01/02/03 ini migrasi dari Operator Round 1 yang sudah pernah lolos
-(lihat `docs/STAGE_SUMMARY.MD` §4). Kalau kamu masih punya submission
-Typeform asli dari 5 kasus OP-01 Round 1, pakai itu langsung — 5 kasus OP-01
-di bawah adalah rekonstruksi berdasarkan kategori yang terdokumentasi
-(`docs/STAGE_SUMMARY.MD`), bukan payload asli. OP-02/OP-03 memakai
-`employee_id` asli yang sudah pernah diverifikasi live di Round 1, jadi itu
-tetap akurat.
+Ini migrasi dari Operator Round 1 yang sudah pernah lolos (lihat
+`docs/STAGE_SUMMARY.MD` §4), jadi setiap test punya dua tujuan sekaligus:
+membuktikan perilaku bisnis lama **tidak berubah**, dan membuktikan nilai yang
+dipakai benar-benar berasal dari `config_snapshot` versi aktif, bukan dari
+`policy_config` lama. Karena itu tiap Operator punya minimal satu baris
+"ambang policy berubah" — itulah satu-satunya baris yang membuktikan migrasinya
+benar-benar terjadi; sisanya hanya membuktikan tidak ada regresi.
 
-**OP-01 — Intake & Normalization** (`trigger_source=typeform`, satu submission
-per call lewat `OP-01 Typeform Intake Poller`; tidak ada `execution_id`
-manual karena dipicu poller, bukan Command Center):
+Semua angka di bawah dihitung ulang dari `dataset/csv/*.csv` terhadap
+`as_of_date="2026-08-03"` kecuali disebut lain. Kalau dataset live sudah diubah
+fixture stage lain, kembalikan dulu sebelum menjalankan tabel ini.
 
-| # | Kategori | Field submission | Expected output | Tindakan tambahan |
+**Prosedur baseline policy** (dipakai oleh semua baris "ambang policy berubah"
+di ketiga Operator). Jangan mengandalkan nama versi tertentu — catat versi aktif
+sebelum mengubah apa pun, lalu aktifkan kembali versi itu setelah selesai:
+
+```sql
+select version_id, change_summary, activated_at from policy_versions where status = 'active';
+```
+
+#### OP-01 — Intake & Normalization
+
+Dipicu `OP-01 Typeform Intake Poller`, satu submission per call, jadi **tidak ada
+`execution_id` manual** — korelasinya lewat Auto run ID. Tiga field wajib:
+`Legal_Name`, `Hire_Date`, dan satu manager identifier; sisanya enrich-later.
+Pita dedup Round 1: `≥0.90` update, `<0.70` create, di antaranya escalate
+`intake_possible_duplicate`.
+
+Baris #1 membuat pekerja baru yang dipakai ulang oleh #2–#3, jadi jalankan
+berurutan dan jangan hapus hasilnya sampai #5 selesai.
+
+**Essentials (live):**
+
+| Urutan | Scenario | Field submission | Expected output | Tindakan tambahan |
 |---|---|---|---|---|
-| 1 | Clean create | `Legal_Name="Farah Kassim"`, `Hire_Date="2026-08-10"`, manager=`Anjali Prakash` (cocok `Manager_Directory` WID `7f350fac-...`) | Row baru di `Workers`, `policy_version_id` terisi di output | Tidak ada |
-| 2 | Name-variant update | Submission kedua untuk pekerja yang sama, `Legal_Name="Farah Kasim"` (typo minor) + `Hire_Date` sama ±0 hari | Fuzzy-dedup skor ≥0.90 → **update** row #1, bukan row baru | Jalankan setelah #1 |
-| 3 | Unparseable date | `Hire_Date="segera"` (tidak match format apa pun) | `intake_validation` system_exception; tidak menebak tanggal | Tidak ada |
-| 4 | Unresolvable manager | Manager identifier yang tidak ada di `Manager_Directory` (mis. `"Manager XYZ"`) | `intake_validation` system_exception (0 kandidat) | Tidak ada |
-| 5 | Missing required field | `Hire_Date` kosong, field lain lengkap | `intake_validation` system_exception (salah satu dari 3 field wajib hilang) | Tidak ada |
+| 1 | Clean create | `Legal_Name="Farah Kassim"`, `Hire_Date="2026-08-10"`, manager `"Anjali Prakash"` (unik di `Manager_Directory`, WID `7f350fac-799a-7cbc-4ae2-ac30d8c331a7`) | Satu row baru di `Workers` dengan `Worker_WID` baru; `Manager_WID` terisi hasil resolve, bukan teks nama; output memuat `policy_version_id` dan `evaluated_at`; satu baris `policy_evaluations` outcome CLEAR untuk keputusan create | Tidak ada |
+| 2 | Name-variant update (pita ≥0.90) | `Legal_Name="Farah Kasim"` (hilang satu `s`), `Hire_Date="2026-08-10"`, manager sama | Skor dedup ≥0.90 → **update** row #1; jumlah row `Workers` tidak bertambah | Jalankan setelah #1 |
+| 3 | Pita tengah → escalate, bukan tebak | `Legal_Name="Farrah Binti Kassim"`, `Hire_Date="2026-08-12"`, manager sama | Skor jatuh di 0.70–0.90 → `intake_possible_duplicate` ke Workbench. **Tidak** ada update ke row #1 dan **tidak** ada row baru — buktikan Operator menolak memutuskan sendiri. Skor fuzzy bergantung data, tidak bisa dipastikan dari membaca kode | Jalankan setelah #1 |
+| 4 | Manager ambigu (>1 kandidat) | Manager identifier `"Kevin Goh"` — nama ini muncul **dua kali** di `Manager_Directory` | `intake_validation` system_exception dengan sebab >1 kandidat. Operator tidak boleh memilih kandidat pertama secara diam-diam. `"Yusof Nair"` adalah kasus duplikat kedua kalau butuh pembanding | Tidak ada |
+| 5 | Ambang policy berubah — **bukti migrasi** | Submission identik baris #3 (`"Farrah Binti Kassim"`) | Hasil berubah dari `intake_possible_duplicate` jadi **update** row #1, murni karena pita dedup di policy diturunkan — bukan karena payload berubah. `policy_version_id` di output dan di `policy_evaluations` ikut berubah | Catat versi aktif lewat query baseline di atas. Buat draft policy baru dengan ambang atas dedup diturunkan ke `0.70`, simulate → approve → activate. **Konfirmasi dulu nama key pita dedup di Policy Studio** — key ini belum terdokumentasi di guide dan tidak boleh ditebak. Setelah test, aktifkan kembali versi baseline |
 
-Plus 1 tes ambang policy: submission dengan skor dedup di pita 0.70–0.90
-(name jauh lebih berbeda dari #2 tapi tetap mirip) terhadap kandidat dari #1 →
-`intake_possible_duplicate` (bukan auto-update, bukan auto-create).
+Setelah #5, hapus pekerja hasil test agar tidak mencemari dataset stage lain:
 
-**OP-02 — Onboarding & Provisioning Risk** (`employee_id`, `execution_id`
-manual via Command Center test form, pin `as_of_date` sesuai kolom):
+```sql
+delete from "Workers" where "Legal_Name" in ('Farah Kassim','Farah Kasim','Farrah Binti Kassim');
+```
 
-| # | Scenario | employee_id | as_of_date | Expected output |
-|---|---|---|---|---|
-| 1 | 3 dari 4 reason code sekaligus | `EMP7000` | `2026-08-03` | `MISSING_DAY_ONE_ACCESS` (Laptop+System Access `Blocked`), `PROVISIONING_DELAYED` (Email `Requested` sejak `2026-07-13`), `TASK_ALREADY_ESCALATED` (2×, `BP-90007`/`BP-90009`); tier HIGH; `policy_version_id` + `evaluated_at` di output; baris `policy_evaluations` tertulis per reason code |
-| 2 | Reason code ke-4 | `EMP7005` | `2026-08-03` | `STALLED_COMPLIANCE_DOC` ("Compliance Document signed", jatuh tempo `2026-05-23`, jauh lewat `task_stalled_overdue_days=3`); `TASK_ALREADY_ESCALATED` (`BP-90073`) |
-| 3 | Clean/LOW (belum pernah dites) | `EMP7012` | `2026-07-20` (sebelum compliance step-nya jatuh tempo `2026-07-21`, supaya belum overdue) | `data_state` normal, 0 reason code, tier LOW; baris `policy_evaluations` tetap tertulis dengan outcome CLEAR |
-| 4 | Ambang policy berubah | `EMP7005` | `2026-08-03` | Sama seperti #2 tapi `STALLED_COMPLIANCE_DOC` **hilang** karena `task_stalled_overdue_days` dinaikkan; `TASK_ALREADY_ESCALATED` tetap muncul (tidak terkait threshold ini) — buktikan hasil + `policy_version_id` berubah bersamaan | Buat draft policy baru dengan `task_stalled_overdue_days=100`, simulate → approve → activate; setelah test, kembalikan `policy_round2_v1` sebagai active |
+**Cakupan tambahan lewat code review:**
 
-**OP-03 — Engagement & Disclosure** (`employee_id`, `execution_id` manual):
+| Skenario | Yang dicek di Code step |
+|---|---|
+| Parse `Hire_Date` multi-format | Daftar format tanggal yang diterima terbaca langsung di Code step; pastikan ada penanganan ambiguitas hari/bulan (`10/08/2026`) dan bahwa format tak dikenal jatuh ke `intake_validation`, bukan ditebak |
+| Di bawah pita (<0.70) → create baru | Cabang `else` dari perbandingan yang sama dengan baris #2/#3; operator perbandingannya sudah diverifikasi di kedua baris itu |
+| `Hire_Date` tidak bisa di-parse | Satu early-return `intake_validation` sebelum write apa pun |
+| Manager tidak dikenal (0 kandidat) | Guard `len(candidates) == 0` bersebelahan dengan guard `> 1` yang sudah dites live di baris #4 |
+| Field wajib hilang | Validasi tiga field wajib (`Legal_Name`, `Hire_Date`, manager identifier) di awal, sebelum read apa pun |
 
-| # | Scenario | employee_id | Expected output | Tindakan tambahan |
-|---|---|---|---|---|
-| 1 | Low engagement (skor terbaru) | `EMP7046` | `LOW_ENGAGEMENT_SCORE` (skor Day 60 = 3, `<5`) | Tidak ada |
-| 2 | Negatif — sudah pulih | `EMP7007` | **Tidak** fire (skor Day 7 = 2 tapi Day 30 = 10 adalah yang terbaru; rule baca skor terbaru, bukan skor terendah) | Tidak ada |
-| 3 | Confidential disclosure asli | `EMP7003` | `confidential=true`, confidence tinggi; `reasons[]` hanya berisi `SENSITIVE_DISCLOSURE_DETECTED` generik; teks komentar asli **hanya** ada di `_internal_case_payload`, tidak pernah di `reasons[]`/log/output standar | Tidak ada |
-| 4 | Sentinel leak test | `EMP7003` | Sama seperti #3, tapi string `SENTINEL_HEALTH_XYZ` **tidak muncul** di `reasons[]`, output standar, event, atau log mana pun — hanya boleh ada (kalau ada) di `_internal_case_payload` yang restricted | Sebelum run: `update "Peakon_Engagement" set "Comment"='...dealing with SENTINEL_HEALTH_XYZ and have not felt able to raise it...' where "Response_ID"='PK-5006';`. Setelah run, kembalikan ke komentar asli |
-| 5 | Ambang policy berubah | `EMP7046` | `LOW_ENGAGEMENT_SCORE` **hilang** (skor 3 tidak lagi `<2`) — buktikan hasil + `policy_version_id` berubah bersamaan | Buat draft policy baru dengan `engagement_low_score=2`, simulate → approve → activate; setelah test, kembalikan `policy_round2_v1` sebagai active |
+#### OP-02 — Onboarding & Provisioning Risk
+
+Read-only, satu hire per call. `employee_id` + `execution_id` manual lewat
+Command Center test form. Empat reason code: `MISSING_DAY_ONE_ACCESS`,
+`PROVISIONING_DELAYED`, `STALLED_COMPLIANCE_DOC`, `TASK_ALREADY_ESCALATED`.
+Agregasi tier bersifat advisory: 0 reason → LOW, 1 → MEDIUM, 2+ → HIGH.
+
+Field yang sama di semua baris: `command_id` = sama dengan `execution_id`;
+`trigger_source = command_center`; pin `as_of_date="2026-08-03"` kecuali
+disebut lain di kolomnya.
+
+**Essentials (live):**
+
+| Urutan | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan |
+|---|---|---|---|---|---|
+| 1 | Keempat reason code sekaligus | `EMP7000` | `cmd_f631f75b1d022b18947700ae3bf6058b` | `MISSING_DAY_ONE_ACCESS` (`INT-60001` Laptop + `INT-60005` System Access, keduanya `Blocked`), `PROVISIONING_DELAYED` (`INT-60002` Email `Requested` sejak `2026-07-13`, tanpa `Fulfilled_On`), `TASK_ALREADY_ESCALATED` (`BP-90007`, `BP-90009`), dan `STALLED_COMPLIANCE_DOC` (`BP-90005` "Compliance training assigned", jatuh tempo `2026-07-31`, 3 hari lewat). Tier HIGH, `confidence=1.0`. Output memuat `policy_version_id` + `evaluated_at`; satu baris `policy_evaluations` per reason code | Tidak ada |
+| 2 | Compliance stalled jauh lewat tempo | `EMP7005` | `cmd_577c15d9c6e6cfddae036e744607f2a7` | `STALLED_COMPLIANCE_DOC` (`BP-90074` "Compliance Document signed", jatuh tempo `2026-05-23`, 72 hari lewat) dan `TASK_ALREADY_ESCALATED` (`BP-90073` "Role goals set"). Tier HIGH. Tidak ada reason provisioning — `EMP7005` tidak punya baris `Blocked` maupun `Requested` yang menggantung. Baris ini adalah baseline pembanding untuk #5 | Tidak ada |
+| 3 | Clean / tier LOW | `EMP7015` | `cmd_7bd741d5cab0742dca7f9b5762a80dea` | 0 reason code, tier LOW, `data_state` normal (**bukan** `no_data_yet` — `EMP7015` punya baris provisioning dan onboarding task, semuanya sehat). Baris `policy_evaluations` tetap ditulis dengan outcome CLEAR. Buktikan migrasi tidak membuat rule fire ke semua orang | Tidak ada |
+| 4a | Batas waktu — sebelum jatuh tempo | `EMP7012` | `cmd_e588eeeda529d0fa4d1818d9106d6133` | 0 reason code, tier LOW. `BP-90165` "Compliance Document signed" jatuh tempo `2026-07-21` dan belum lewat pada `as_of` ini | Pin `as_of_date="2026-07-20"` |
+| 4b | Batas waktu — sesudah jatuh tempo | `EMP7012` | `cmd_4ee3d056c463598dc0761e3f0443488d` | `STALLED_COMPLIANCE_DOC` (`BP-90165`, 13 hari lewat); tier MEDIUM. Pasangan 4a/4b adalah **satu-satunya** bukti bahwa perbandingan tanggal memakai `as_of_date` dari policy, bukan jam sistem — kalau keduanya memberi hasil identik, migrasinya belum menyentuh STEP 2 | Pin `as_of_date="2026-08-03"` |
+| 5 | Ambang policy berubah — **bukti migrasi** | `EMP7005` | `cmd_c905f021dcbb586ee720b56c64b5192f` | Sama seperti #2 tapi `STALLED_COMPLIANCE_DOC` **hilang** karena `task_stalled_overdue_days` dinaikkan jauh di atas 72; `TASK_ALREADY_ESCALATED` tetap muncul karena tidak terkait threshold ini, sehingga tier turun dari HIGH ke MEDIUM. `policy_version_id` di output dan di `policy_evaluations` berbeda dari baris #2 | Catat versi aktif lewat query baseline. Buat draft policy baru dengan `thresholds.task_stalled_overdue_days=100`, simulate → approve → activate. Setelah test, aktifkan kembali versi baseline |
+
+**Cakupan tambahan lewat code review:**
+
+| Skenario | Yang dicek di Code step |
+|---|---|
+| Tier MEDIUM pada tepat satu reason (`EMP7028`) | Agregasi tier hanyalah pemetaan hitungan → label (`0` LOW, `1` MEDIUM, `≥2` HIGH); kedua ujungnya sudah terbukti live di baris #1 (HIGH) dan #3 (LOW), jadi titik tengahnya terbaca langsung |
+| `no_data_yet` bukan error | Cabang "nol baris sumber" mengembalikan `data_state: "no_data_yet"` tanpa system_exception. Sengaja tidak dijadikan live test: tidak ada employee di dataset yang benar-benar tanpa baris sumber, sehingga test-nya menuntut penghapusan data live sementara — risiko fixture-nya lebih besar daripada nilai buktinya |
+
+Catatan untuk baris #1 dan #2: pencocokan langkah compliance memakai daftar term
+yang bisa dikonfigurasi (`thresholds.compliance_step_terms`, ADR-016), bukan
+substring hardcoded. Kalau `BP-90005` tidak ikut fire di baris #1, periksa
+daftar term itu di `config_snapshot` sebelum menyalahkan logic — "Compliance
+training assigned" dan "Compliance Document signed" adalah dua penamaan langkah
+yang berbeda dan keduanya harus tertangkap.
+
+#### OP-03 — Engagement & Disclosure
+
+Read-only atas `Peakon_Engagement`, ditambah satu step klasifikasi LLM untuk
+rule 3. Rule 1 (`LOW_ENGAGEMENT_SCORE`) membaca skor **paling baru**, bukan
+paling rendah. Rule 2 (`SURVEY_NON_RESPONSE`) tidak diimplementasikan di Round 1
+dan tetap di luar cakupan migrasi ini — jangan buat test untuknya.
+
+Field yang sama di semua baris: `command_id` = sama dengan `execution_id`;
+`trigger_source = command_center`.
+
+**Essentials (live):**
+
+| Urutan | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan |
+|---|---|---|---|---|---|
+| 1 | Low engagement — skor terbaru | `EMP7046` | `cmd_905938e664ce8ae7a7bc5b2a9a038b83` | `LOW_ENGAGEMENT_SCORE` (Day 60 = 3, di bawah `engagement_low_score` default 5). Riwayatnya naik dulu (Day 7 = 6, Day 30 = 9) lalu jatuh, jadi ini juga membuktikan rule tidak memakai rata-rata. Baseline pembanding untuk #6 | Tidak ada |
+| 2 | Negatif — turun lalu pulih di tiga titik | `EMP7021` | `cmd_c054f8de1c7d9a904c73e226bc1b4267` | **Tidak** fire. Day 7 = 9, Day 30 = 2, Day 60 = 7. Nilai rendahnya ada di tengah, bukan di awal atau akhir — membuktikan milestone benar-benar diurutkan, bukan diambil baris pertama/terakhir dari hasil query. Ini kasus urutan terkuat di dataset | Tidak ada |
+| 3 | Confidential disclosure asli | `EMP7003` | `cmd_17417140fc97cdd28c95ccd4d6bb3fe3` | `confidential=true` dengan confidence tinggi atas `PK-5006` (Day 7, komentar soal masalah kesehatan). `reasons[]` hanya berisi kode generik `SENSITIVE_DISCLOSURE_DETECTED`; teks komentar asli **hanya** boleh ada di `_internal_case_payload`, tidak pernah di `reasons[]`, output standar, event, atau log. `LOW_ENGAGEMENT_SCORE` **tidak** fire — skor terbaru `EMP7003` adalah Day 30 = 6, jadi baris ini sekaligus membuktikan kedua rule independen | Tidak ada |
+| 4 | Disclosure tidak boleh tertutup survei terbaru yang sehat | `EMP7090` | `cmd_e49310159d4e6095b780cf1104b7641b` | `PK-5209` (Day 30, skor 4) berisi disclosure pelecehan, tapi baris terbaru `PK-5210` (Day 60, skor 7) rutin dan sehat. Disclosure tetap harus terdeteksi dan dirutekan confidential; `LOW_ENGAGEMENT_SCORE` tidak fire karena skor terbaru 7. **Kalau disclosure tidak terdeteksi**, artinya rule 3 hanya mengklasifikasi komentar terbaru — itu melanggar PER-OPERATOR KEYS OP-03; perbaiki cakupan scan-nya, jangan ubah expected di sini | Tidak ada |
+| 5 | Sentinel leak test | `EMP7003` | `cmd_34d56294bd009ad465dfe37a8d0b88c1` | Hasil sama seperti #3, tapi string `SENTINEL_HEALTH_XYZ` **tidak muncul** di `reasons[]`, output standar, `workflow_events`, Activity Timeline, atau log mana pun — hanya boleh ada di `_internal_case_payload` yang restricted | Sebelum run: `update "Peakon_Engagement" set "Comment" = 'Managing, though I have been dealing with SENTINEL_HEALTH_XYZ and have not felt able to raise it with my manager yet.' where "Response_ID" = 'PK-5006';`<br>Sesudah run: `update "Peakon_Engagement" set "Comment" = 'Managing, though I have been dealing with a health matter and have not felt able to raise it with my manager yet.' where "Response_ID" = 'PK-5006';` |
+| 6 | Ambang policy berubah — **bukti migrasi** | `EMP7046` | `cmd_447b3286bec7424c408523f797ba357c` | `LOW_ENGAGEMENT_SCORE` **hilang** karena skor 3 tidak lagi di bawah ambang baru `2`. `policy_version_id` di output dan di `policy_evaluations` berbeda dari baris #1 — buktikan hasil berubah murni karena versi policy, bukan karena data Peakon berubah | Catat versi aktif lewat query baseline. Buat draft policy baru dengan `thresholds.engagement_low_score=2`, simulate → approve → activate. Setelah test, aktifkan kembali versi baseline |
+
+Baris #5 mengubah data live; pastikan `update` pengembaliannya benar-benar
+dijalankan sebelum stage lain berjalan, karena §6 4.R2.2 dan ORCH-01 O.1 test #5
+memakai `PK-5006` yang sama.
+
+**Cakupan tambahan lewat code review:**
+
+| Skenario | Yang dicek di Code step |
+|---|---|
+| Negatif dua titik (`EMP7007`: Day 7 = 2 → Day 30 = 10) | Kasus yang sama persis dengan baris #2, hanya dengan dua titik alih-alih tiga. Begitu pengurutan milestone terbukti benar di #2, kasus dua titik tidak menambah bukti apa pun |
+| Disclosure tanpa low-engagement (`EMP7005`, skor 6) | Independensi kedua rule sudah terbukti di baris #3 — `EMP7003` juga menghasilkan disclosure tanpa `LOW_ENGAGEMENT_SCORE`. Yang perlu dicek di kode: rule 1 dan rule 3 dievaluasi dari cabang terpisah, dan hasil rule 3 tidak pernah men-short-circuit rule 1 |
 
 ## 6. OP-04 — Round 2 routing amendments
 
@@ -1409,12 +1601,12 @@ is not evidence.
 | 6.1 | OP-06 | Restricted context/read | Build/test | Privacy review | G-01 | Saved | Partial (live restricted read passed) | `EMP7062` read only payroll ID/cycle/status and safe worker fields; no `error_reason`, `gross`, or `net` appeared in the Activity Timeline. Full sentinel fixture remains useful for final privacy evidence. |
 | 6.2 | OP-06 | Payroll rules + logs | Build/test | Verify persisted log | 6.1 | Done | Passed (8/8 + detector audit replay) | All original tests passed. Final detector-only audit uses deterministic ID `eval_384f4e323463fcab9ab42c921a6992be`; replay kept `row_count=1` under active policy `policy_29dfdf8bbb3441d0aa758b2b020773fe`. |
 | 6.3 | OP-06/OP-04 | Restricted payroll case route | Build after gate | Prove G-02 | G-02, 6.2 | Saved | Partial (core route/idempotency passed) | OP-06 is detector-only; OP-04 created canonical restricted case `payroll:EMP7062` with sanitized context. OP-06 audit replay is idempotent and no longer writes Workbench cases. Reopen/CLEAR/failure-path tests remain; close legacy `payroll-PAY-40063` through Workbench. |
-| 7.1 | OP-07 | Dependencies + learning | Build/test | Fixture support | G-01 | Saved | Not started | Initial employee-mode workflow saved; dependency, learning, and privacy tests pending. |
+| 7.1 | OP-07 | Dependencies + learning | Build/test | Fixture support | G-01 | Done | Passed (5/5) | Grouped Day-1 blockers, learning overdue, clean employee, invalid `due_day` isolation, and the Peakon sentinel privacy check all passed. Two bugs were fixed during the build: `Learning_Milestones` was queried with non-existent columns `id`/`milestone_name` instead of `milestone_id`/`course`, which made `LEARNING_MILESTONE_OVERDUE` silently unable to fire for anyone; and `due_day` was parsed with `re.search` instead of an exact `fullmatch`, so a malformed value like `Day 7 (tentative)` would have been accepted instead of raising a data-quality exception. |
 | 7.2 | OP-07 | Cohort bottlenecks | Build/test | Verify API parity | 7.1 | Saved | Passed (6/7; #6 skipped, blocked) | Tests #1–#5 and #7 passed against real cohort data (`COH-2026-W22`, `W29`, `W17`, `W26`). Test #6 (pagination) cannot run yet: the cohort branch chunks `employee_id` for the `in.()` filter (`chunk_size=200`) but has no result-page `limit`/`offset` loop on `Cross_Team_Dependencies` itself, so there is nothing to shrink without a code change first. |
 | 7.3 | OP-07 | Manager state machine | Build/test | Prove G-03 | G-03, 7.1 | Done | Passed (4/4 live; 6 covered by code review) | Pipeline OP-07 kini 4 step: Day-1 Readiness → Learning → Manager Accountability → Write Evaluation. Empat test esensial lolos (`EMP7009`, `EMP7014`, `EMP7015`, `EMP7016`); escalation menulis lewat RPC dan `CASE-73-07` berpindah ke `escalated`. Bug yang ditemukan dan diperbaiki sepanjang build: step Manager Accountability belum pernah ada dan Write Evaluation membaca output Learning (rantai putus); payload RPC memakai nama argumen yang tidak ada (`case_id`/`new_state`/`event_timestamp` alih-alih `target_case_id`/`new_event_type`/`event_occurred_at`); escalation digerbangi kondisi overdue padahal cap reminder bersifat independen; `reasons` berisi kalimat, bukan reason code; `execution_id` tidak pernah ditulis ke `policy_evaluations`; `Learning_Milestones` di-query dengan kolom `id`/`milestone_name` yang tidak ada |
-| C.1 | OP-01 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Not started | Not started | |
-| C.2 | OP-02 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Not started | Not started | |
-| C.3 | OP-03 | Active-policy compatibility | Build/privacy regression | Verify policy log | G-01 | Not started | Not started | |
+| C.1 | OP-01 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Saved | Not started | Migrasi ke active versioned policy sudah diterapkan; tinggal 5 test esensial §5 (clean create, name-variant ≥0.90, pita tengah escalate, manager ambigu, ambang policy). 5 skenario lain turun ke code review. |
+| C.2 | OP-02 | Active-policy compatibility | Build/regression | Verify policy log | G-01 | Saved | Not started | Migrasi sudah diterapkan; tinggal 6 test esensial §5. Pasangan boundary `EMP7012` (`as_of` 2026-07-20 vs 2026-08-03) wajib dijalankan — itu satu-satunya bukti `as_of_date` benar-benar dibaca, bukan jam sistem. 2 skenario turun ke code review. |
+| C.3 | OP-03 | Active-policy compatibility | Build/privacy regression | Verify policy log | G-01 | Saved | Not started | Migrasi sudah diterapkan; tinggal 6 test esensial §5, termasuk sentinel leak `PK-5006` yang jadi bukti gate Privacy di §9. 2 skenario turun ke code review. |
 | 4.R2.1 | OP-04 | New-code routing/grouped cases | Build/test | Verify Workbench API | 5.2, 6.2, 7.1 | Saved | Partial (compliance + payroll + compliance dedup passed) | `compliance:EMP7054:SG` and `payroll:EMP7062` verified with sanitized logs/context; repeat compliance delivery kept one case. Unknown code, OP-07 routes, reopen/CLEAR lifecycle, and registry-count de-hardcoding remain. |
 | 4.R2.2 | OP-04 | Confidential independence | Build/test | Privacy review | 4.R2.1 | Not started | Not started | |
 | O.1 | ORCH-01 | Parallel fan-out/merge | Build/test | Observe mocks/API | OP-05/06/07 unit tests | Not started | Not started | |
