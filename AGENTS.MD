@@ -2,6 +2,8 @@
 
 Use `skills/project-workflow/SKILL.md` for development commands, code conventions, and verification. Read it before implementing a change.
 
+Read `docs/AGENT_LESSONS.md` before debugging, before reviewing an Auto Studio step, and before designing any live test. It records the specific failures that have already cost rounds in this project, so a known trap is not rediscovered. Add a short entry whenever an attempt fails; record the prevention, not credentials or confidential payloads.
+
 - This is the Round 2 HR & People Ops Command Center. Read `docs/ProblemStatement__Onboarding_and_Retention.pdf` and `docs/STAGE_SUMMARY.MD` before changing HR workflows or data contracts.
 - Auto by Supervity owns the Orchestrator and Operators. This repository owns the FastAPI/Next.js Command Center, policy APIs, data views, and human-workbench experience.
 - Treat Supabase as the HR system of record unless an approved migration says otherwise. Do not create a competing source of truth.

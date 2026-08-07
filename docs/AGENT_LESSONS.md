@@ -351,3 +351,97 @@ credentials or confidential payloads.
   It preserves column names and row alignment, reduces transcription mistakes,
   and makes deterministic IDs, outcomes, and execution correlation reviewable.
 
+## Auto Studio live-build lessons — 2026-08-08 (OP-01 compatibility migration)
+
+### Every builder fix prompt must ship with exactly one test
+
+- Mistake: treating a fix prompt and its verification as separate activities,
+  sending a rewrite prompt with no designated test or with a multi-row test
+  table attached.
+- Prevention: Auto only persists a builder change by executing the workflow
+  once, so that execution should be spent proving the specific defect is fixed.
+  Pair every rewrite prompt with exactly one test whose result *differs*
+  depending on whether the fix landed — a passing-looking number that both
+  branches produce (a 97% similarity score here) discriminates nothing. Prefer
+  asserting on the step's stdout envelope over database side effects, since
+  stdout is visible in the Activity Timeline either way.
+
+### A correct `policy_version_id` is not evidence the policy was read
+
+- Mistake: OP-01's fuzzy dedup step reported the active `policy_version_id` in
+  both its output and its `policy_evaluations` row while deciding from
+  `{confidence: 0.9, flag_band: 0.75, proximity_days: 30}` — the hardcoded
+  Round 1 defaults. The active snapshot held `{0.7, 0.7, 3}`. The audit trail
+  looked fully migrated; only the decision numbers were stale, which would have
+  read as a data bug rather than a migration bug during the policy-change test.
+- Prevention: require every migrated step to echo the *resolved threshold
+  values* it actually used, not just the version ID, and assert on those
+  numbers. Design the proving test around a policy key whose live value differs
+  from the hardcoded default. The strongest tell is a value that exists in **no**
+  policy version at all (`0.75` was never any version's `dedup_flag_band_low`),
+  because matching the current active value can happen by coincidence.
+
+### A saved prompt is not a satisfied requirement
+
+- Mistake: the existing lesson about checking literal markers was followed and
+  the marker did appear — the rewrite genuinely added `thresholds_used`,
+  `halt_pipeline`, the new intake vocabulary, and the previously missing
+  evaluation row. The one requirement the rewrite existed for, reading
+  thresholds from the snapshot, was still silently unmet because a default
+  dictionary survived underneath.
+- Prevention: marker presence proves the prompt reached the step; only the
+  marker's *value* proves the requirement. When a rewrite must remove a
+  fallback, name the forbidden constructs explicitly — the literal numbers, a
+  `dict.get` with a default, a `try/except` that substitutes a value — and make
+  the test assert the value rather than the field's existence.
+
+### Renaming an output value can break a canvas branch condition
+
+- Mistake: a rewrite replaced fuzzy dedup's `review` result with
+  `intake_possible_duplicate`. The workflow canvas routes on a separate
+  "Dedup Requires Review" edge condition that may still match the old string.
+  The verifying run happened to return `will_update`, never exercised that
+  branch, and left the mismatch invisible.
+- Prevention: in a branched Auto workflow, step code and canvas edge conditions
+  are two separate places the same vocabulary appears. After changing any value
+  a branch dispatches on, inspect the edge condition on the canvas and run one
+  case that traverses the renamed branch. A stale condition fails open —
+  execution continues down the success edge instead of escalating.
+
+### Builder "implementation" runs write to the live database
+
+- Mistake: accepted that a builder implementation run was a write-free mock and
+  read an empty `Workers` result as proof that an escalation branch had halted
+  the pipeline. Those same runs had already persisted `policy_evaluations` rows,
+  and a later one updated a fixture row's `Legal_Name` and `Hire_Date`.
+- Prevention: treat every builder execution as a real write against Supabase.
+  Reset fixtures before each verification run and clean up afterwards, and never
+  use an unchanged table as evidence about control flow without first proving
+  that the run writes at all.
+
+### Builder-generated code can embed a real credential
+
+- Mistake: three OP-01 steps contained a literal `service_role` JWT for the live
+  project, introduced by the builder itself and framed in comments as
+  "placeholder detection" with a fallback that read as defensive engineering.
+- Prevention: scan every generated step for literal keys, tokens, and project
+  refs before reviewing its logic. Specify env-only credential reads with **no**
+  default argument, so a missing variable fails loudly instead of silently
+  falling back to an embedded key. Rotating the key does not remove the leak
+  from the workflow source or from the builder chat history.
+
+### Audit columns drift apart unless the convention is restated every time
+
+- Mistake: four OP-01 steps each invented their own `execution_id`
+  (`manual_execution`, `local_execution`, `manual_run_context`,
+  `manual_execution_for_implementation`), wrote `evidence` as a `json.dumps`
+  string into a `jsonb` column, and disagreed on vocabulary (`PASS`/`SKIP`/`FAIL`
+  and `MANDATORY_HIRE_DATE` against `clear` and `manager_resolution`). One step
+  also placed a submitted manager name into `evidence` despite the prompt
+  forbidding it.
+- Prevention: repeat the audit conventions verbatim in every per-step prompt
+  rather than assuming they carry over — a single shared `execution_id` source,
+  `evidence` passed as a dict, lowercase snake_case `policy_key`/`outcome`, and
+  identifiers-and-counts only. Rows written by separate steps of one run cannot
+  be proven to belong to that run when each step names the run differently.
+
