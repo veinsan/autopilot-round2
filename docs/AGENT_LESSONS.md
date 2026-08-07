@@ -430,6 +430,49 @@ credentials or confidential payloads.
   falling back to an embedded key. Rotating the key does not remove the leak
   from the workflow source or from the builder chat history.
 
+### "Keep everything else unchanged" turns a rewrite prompt back into a diff
+
+- Mistake: a Supabase-write rewrite opened with "Rewrite the entire step from
+  scratch" but added "Keep every behaviour not mentioned below exactly as it is
+  now." The builder dropped it silently — the returned step kept the old
+  `status` string, omitted the newly required `reasons` field, and left the old
+  `error` field in place. The earlier fuzzy-dedup rewrite, which restated the
+  full behavioural spec and explicitly said not to assume anything carried over,
+  landed on the first attempt.
+- Prevention: a rewrite prompt must be self-contained. Restate every behaviour
+  the step needs, including the parts that are already correct, and never point
+  at the current code as the source for anything. One sentence deferring to the
+  existing implementation is enough to make the whole prompt read as a change
+  list, which is the shape that never saves.
+
+### Specify nested JSON with a literal shape example, not prose
+
+- Mistake: a prompt said `evidence` "must be passed as a Python dict inside a
+  bare JSON array body". The builder inverted both halves — it sent the row
+  object directly as the body and wrapped `evidence` in a list, producing
+  `evidence` = `[{...}]` in a `jsonb` column. Prose that describes two nesting
+  levels at once is read as one.
+- Prevention: when a request body or a JSON column has structure, paste the
+  literal shape into the prompt and say which part is which, for example
+  `[ { "policy_key": "...", "evidence": { "worker_wid": "..." } } ]`. Then state
+  the two failure modes explicitly: do not put the row object directly in the
+  body, and do not wrap evidence in a list.
+
+### Stop rewriting once the decision path is correct
+
+- Mistake: after the Supabase Write step already produced correct decisions,
+  correct gating, a real run `execution_id`, `outcome = "clear"`, and a null
+  `Employee_ID`, another rebuild round was proposed for three audit-shape items
+  — evidence nesting, a success code reported in an `error_status_code` field,
+  and an `action` label that disagreed with the dedup step. None of them changes
+  what the Operator decides, and no essential test measures any of them.
+- Prevention: before spending a builder round, ask which live test would fail if
+  the defect stayed. If the answer is none, record it as optional debt in the
+  guide and move on — every round costs an execution, and Operators that have
+  not been verified at all are worth more than polish on one that already works.
+  Separate "changes a decision" from "changes how the audit row looks" when
+  triaging a review, and say which category each finding is in.
+
 ### Audit columns drift apart unless the convention is restated every time
 
 - Mistake: four OP-01 steps each invented their own `execution_id`
