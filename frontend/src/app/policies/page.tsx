@@ -10,11 +10,20 @@ import {
 } from 'react'
 import { useSession } from 'next-auth/react'
 import apiClient from '@/lib/api-client'
+import { reasonCodeLabel } from '@/lib/runs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,7 +73,25 @@ type SimulationResult = {
   delta_by_code: Record<string, number>
 }
 
+/** Stored keys. `IN` is India. Nothing here may be added or renamed from the UI. */
 const jurisdictions = ['default', 'MY', 'SG', 'AU', 'IN', 'PH'] as const
+
+const countryJurisdictions = jurisdictions.filter(
+  (jurisdiction) => jurisdiction !== 'default'
+)
+
+/**
+ * What the reader sees. Country names in full: the stored keys are codes, and
+ * Windows has no flag font, so an emoji flag renders as the bare letters.
+ */
+const jurisdictionLabels: Record<string, string> = {
+  default: 'Everywhere else',
+  MY: 'Malaysia',
+  SG: 'Singapore',
+  AU: 'Australia',
+  IN: 'India',
+  PH: 'Philippines',
+}
 
 const registeredReasonCodes = [
   'MISSING_DAY_ONE_ACCESS',
@@ -87,43 +114,64 @@ const registeredReasonCodes = [
   'COHORT_DEPENDENCY_BOTTLENECK',
 ]
 
-const policyGroups = [
+/**
+ * Settings that can differ by country. The stored keys are unchanged; the
+ * headings and field labels are the words an HR manager would use.
+ */
+const thresholdGroups = [
   {
-    title: 'Compliance & work authorization',
-    description:
-      'Warning windows for document and work authorization deadlines.',
+    id: 'compliance',
+    title: 'Documents and work permits',
+    description: 'How early a deadline should start showing up as a warning.',
     fields: [
-      ['compliance_at_risk_days', 'Compliance warning window (days)'],
+      [
+        'compliance_at_risk_days',
+        'Warn this many days before a document is due',
+      ],
       [
         'work_auth_expiry_at_risk_days',
-        'Work authorization warning window (days)',
+        'Warn this many days before a work permit runs out',
       ],
     ],
   },
   {
-    title: 'First payroll',
-    description: 'First-payroll confirmation deadline by jurisdiction.',
-    fields: [['first_payroll_cutoff_days', 'Cutoff after start date (days)']],
+    id: 'payroll',
+    title: 'First pay',
+    description: 'How long after a start date first pay must be confirmed.',
+    fields: [
+      [
+        'first_payroll_cutoff_days',
+        'Confirm first pay within this many days of the start date',
+      ],
+    ],
+  },
+  {
+    id: 'manager',
+    title: 'Manager follow-up',
+    description: 'How fast a manager has to respond, and how often we remind.',
+    fields: [
+      ['nudge_cadence_days', 'Days between reminders'],
+      [
+        'manager_acknowledgment_deadline_days',
+        'Days a manager has to confirm they have seen it',
+      ],
+      ['manager_action_deadline_days', 'Days a manager has to act on it'],
+      ['manager_max_reminders', 'Most reminders to send'],
+    ],
   },
 ] as const
 
+/** These are the same everywhere and are never set per country. */
 const globalThresholds = [
-  ['bottleneck_min_workers', 'Minimum affected workers'],
-  ['bottleneck_min_percent', 'Minimum affected cohort (%)'],
-  ['minimum_cohort_size', 'Minimum cohort size'],
-] as const
-
-const managerJurisdictionThresholds = [
-  ['nudge_cadence_days', 'Nudge cadence (days)'],
-  ['manager_acknowledgment_deadline_days', 'Acknowledgment deadline (days)'],
-  ['manager_action_deadline_days', 'Action deadline (days)'],
-  ['manager_max_reminders', 'Maximum reminders'],
+  ['bottleneck_min_workers', 'People affected before we call it a hold-up'],
+  ['bottleneck_min_percent', 'Share of the group affected (%)'],
+  ['minimum_cohort_size', 'Smallest group we report on'],
 ] as const
 
 function parseSnapshot(value: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('The snapshot must be a JSON object.')
+    throw new Error('The advanced settings box does not hold a whole policy.')
   }
   return parsed as Record<string, unknown>
 }
@@ -151,6 +199,270 @@ function thresholdValue(
   } catch {
     return ''
   }
+}
+
+/**
+ * Which countries carry a value of their own. A country value keeps working
+ * whether or not the screen is showing it, so the screen has to say so.
+ */
+function countriesWithOwnValue(
+  snapshot: string,
+  keys: readonly string[]
+): string[] {
+  return countryJurisdictions.filter((country) =>
+    keys.some((key) => thresholdValue(snapshot, key, country) !== '')
+  )
+}
+
+function listSentence(items: string[]): string {
+  if (items.length <= 1) return items.join('')
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reading and writing any setting in the draft                                */
+/*                                                                            */
+/* Every control in this policy is reachable through one of these, so nobody   */
+/* has to open the text box to change how the checks behave.                   */
+/* -------------------------------------------------------------------------- */
+
+function readPath(snapshot: string, path: readonly string[]): unknown {
+  try {
+    let node: unknown = parseSnapshot(snapshot)
+    for (const key of path) {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined
+      node = (node as Record<string, unknown>)[key]
+    }
+    return node
+  } catch {
+    return undefined
+  }
+}
+
+/** Returns the draft as text with one value replaced. Throws on invalid text. */
+function writePath(
+  snapshot: string,
+  path: readonly string[],
+  value: unknown
+): string {
+  const root = parseSnapshot(snapshot)
+  let node = root
+  for (const key of path.slice(0, -1)) {
+    const next = node[key]
+    node[key] =
+      next && typeof next === 'object' && !Array.isArray(next)
+        ? { ...(next as Record<string, unknown>) }
+        : {}
+    node = node[key] as Record<string, unknown>
+  }
+  const last = path[path.length - 1]
+  if (value === undefined) delete node[last]
+  else node[last] = value
+  return JSON.stringify(root, null, 2)
+}
+
+function stringAt(snapshot: string, path: readonly string[]): string {
+  const value = readPath(snapshot, path)
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : ''
+}
+
+function listAt(snapshot: string, path: readonly string[]): string[] {
+  const value = readPath(snapshot, path)
+  return Array.isArray(value) ? value.map((item) => String(item)) : []
+}
+
+type SettingProps = {
+  snapshot: string
+  path: readonly string[]
+  label: string
+  hint?: string
+  disabled?: boolean
+  onChange: (path: readonly string[], value: unknown) => void
+}
+
+function NumberSetting({
+  snapshot,
+  path,
+  label,
+  hint,
+  disabled,
+  onChange,
+  step,
+  max,
+  suffix,
+}: SettingProps & { step?: number; max?: number; suffix?: string }) {
+  const id = `setting-${path.join('-')}`
+  return (
+    <div className='space-y-1'>
+      <Label htmlFor={id} className='block text-xs font-normal text-muted-foreground'>
+        {label}
+      </Label>
+      <div className='flex items-center gap-2'>
+        <Input
+          id={id}
+          type='number'
+          min={0}
+          max={max}
+          step={step ?? 1}
+          className='w-32'
+          disabled={disabled}
+          value={stringAt(snapshot, path)}
+          aria-describedby={hint ? `${id}-hint` : undefined}
+          onChange={(event) =>
+            onChange(
+              path,
+              event.target.value === '' ? undefined : Number(event.target.value)
+            )
+          }
+        />
+        {suffix && (
+          <span className='text-xs text-muted-foreground'>{suffix}</span>
+        )}
+      </div>
+      {hint && (
+        <p id={`${id}-hint`} className='text-xs text-muted-foreground'>
+          {hint}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function TextSetting({
+  snapshot,
+  path,
+  label,
+  hint,
+  disabled,
+  onChange,
+  placeholder,
+}: SettingProps & { placeholder?: string }) {
+  const id = `setting-${path.join('-')}`
+  return (
+    <div className='space-y-1'>
+      <Label htmlFor={id} className='block text-xs font-normal text-muted-foreground'>
+        {label}
+      </Label>
+      <Input
+        id={id}
+        disabled={disabled}
+        placeholder={placeholder}
+        value={stringAt(snapshot, path)}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        onChange={(event) =>
+          onChange(path, event.target.value === '' ? undefined : event.target.value)
+        }
+      />
+      {hint && (
+        <p id={`${id}-hint`} className='text-xs text-muted-foreground'>
+          {hint}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function TextAreaSetting({
+  snapshot,
+  path,
+  label,
+  hint,
+  disabled,
+  onChange,
+}: SettingProps) {
+  const id = `setting-${path.join('-')}`
+  return (
+    <div className='space-y-1'>
+      <Label htmlFor={id} className='block text-xs font-normal text-muted-foreground'>
+        {label}
+      </Label>
+      <textarea
+        id={id}
+        disabled={disabled}
+        rows={3}
+        className='w-full rounded-lg border border-input bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-cornflower/50 disabled:opacity-50'
+        value={stringAt(snapshot, path)}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        onChange={(event) =>
+          onChange(path, event.target.value === '' ? undefined : event.target.value)
+        }
+      />
+      {hint && (
+        <p id={`${id}-hint`} className='text-xs text-muted-foreground'>
+          {hint}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** A list of short values, edited a row at a time so nobody types brackets. */
+function ListSetting({
+  snapshot,
+  path,
+  label,
+  hint,
+  disabled,
+  onChange,
+  numeric,
+  addLabel,
+}: SettingProps & { numeric?: boolean; addLabel: string }) {
+  const items = listAt(snapshot, path)
+  const write = (next: string[]) =>
+    onChange(
+      path,
+      numeric ? next.map((item) => Number(item) || 0) : next.filter(Boolean)
+    )
+
+  return (
+    <div className='space-y-2'>
+      <p className='text-xs text-muted-foreground'>{label}</p>
+      <div className='space-y-2'>
+        {items.map((item, index) => (
+          <div key={index} className='flex items-center gap-2'>
+            <Input
+              value={item}
+              type={numeric ? 'number' : 'text'}
+              min={numeric ? 0 : undefined}
+              disabled={disabled}
+              aria-label={`${label}, item ${index + 1}`}
+              onChange={(event) => {
+                const next = [...items]
+                next[index] = event.target.value
+                write(next)
+              }}
+            />
+            <Button
+              type='button'
+              size='icon-sm'
+              variant='ghost'
+              disabled={disabled}
+              aria-label={`Remove item ${index + 1}`}
+              onClick={() => write(items.filter((_, at) => at !== index))}
+            >
+              <Icons.close className='h-4 w-4' />
+            </Button>
+          </div>
+        ))}
+        {items.length === 0 && (
+          <p className='text-xs text-muted-foreground'>Nothing listed yet.</p>
+        )}
+      </div>
+      <Button
+        type='button'
+        size='sm'
+        variant='outline'
+        disabled={disabled}
+        onClick={() => write([...items, numeric ? '0' : ''])}
+      >
+        <Icons.plus className='h-4 w-4' />
+        {addLabel}
+      </Button>
+      {hint && <p className='text-xs text-muted-foreground'>{hint}</p>}
+    </div>
+  )
 }
 
 const statusStyles: Record<string, string> = {
@@ -188,6 +500,27 @@ function formatTimestamp(value?: string): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString()
 }
 
+const goLiveSteps = [
+  {
+    title: 'Write a draft',
+    detail:
+      'Copy the rules in force and change what you need. Nothing happens yet.',
+  },
+  {
+    title: 'Test it',
+    detail:
+      'See what the change would pick up on today’s people. Nobody is contacted.',
+  },
+  {
+    title: 'Get it approved',
+    detail: 'A colleague with approval rights signs the change off.',
+  },
+  {
+    title: 'Make it active',
+    detail: 'An admin puts it in force. Every check from then on uses it.',
+  },
+]
+
 export default function PolicyStudioPage() {
   const { data: session } = useSession()
   const roles = useMemo(() => new Set(session?.roles ?? []), [session?.roles])
@@ -219,6 +552,14 @@ export default function PolicyStudioPage() {
   const [deleteTarget, setDeleteTarget] = useState<Policy | null>(null)
   const [draftEditorOpen, setDraftEditorOpen] = useState(false)
   const [showHidden, setShowHidden] = useState(false)
+  /**
+   * Presentation only. A missing entry means "decide from the draft itself", so
+   * a draft that already has country values opens with its countries showing.
+   * A loaded snapshot clears the map and hands the decision back to the data.
+   */
+  const [perCountryOpen, setPerCountryOpen] = useState<Record<string, boolean>>(
+    {}
+  )
   // A simulation answers a question the reader asked, so the answer is where
   // they are sent — it sits in the second column, below everything on a narrow
   // screen.
@@ -237,15 +578,16 @@ export default function PolicyStudioPage() {
         const detail = await fetchPolicy(policy)
         setSnapshot(JSON.stringify(detail.config_snapshot, null, 2))
         setBaseVersion(detail.version_id)
+        setPerCountryOpen({})
         setMessage(
-          `The complete ${detail.version_id} snapshot is loaded as the editing baseline.`
+          `Your draft starts from version ${detail.version_id}. Change what you need, then save it.`
         )
       } catch (error) {
         setBaseVersion(null)
         setProblem(
           error instanceof Error
-            ? `The active snapshot could not be loaded: ${error.message}`
-            : 'The active snapshot could not be loaded.'
+            ? `The rules in force could not be loaded: ${error.message}`
+            : 'The rules in force could not be loaded.'
         )
       }
     },
@@ -265,8 +607,8 @@ export default function PolicyStudioPage() {
     } catch (error) {
       setProblem(
         error instanceof Error
-          ? `Policy details could not be loaded: ${error.message}`
-          : 'Policy details could not be loaded.'
+          ? `This version could not be opened: ${error.message}`
+          : 'This version could not be opened.'
       )
       setSelectedPolicy(null)
     } finally {
@@ -286,13 +628,16 @@ export default function PolicyStudioPage() {
             (policy) => policy.status === 'active'
           )
           if (active) await loadSnapshot(active)
-          else setMessage('No active policy is available as a draft baseline.')
+          else
+            setMessage(
+              'No version is in force yet, so there is nothing to copy a draft from.'
+            )
         }
       } catch (error) {
         setProblem(
           error instanceof Error
             ? error.message
-            : 'The policy list could not be loaded.'
+            : 'The list of versions could not be loaded.'
         )
       } finally {
         setLoading(false)
@@ -339,29 +684,89 @@ export default function PolicyStudioPage() {
       setMessage(null)
     } catch (error) {
       setProblem(
-        error instanceof Error ? error.message : 'The snapshot JSON is invalid.'
+        error instanceof Error
+          ? error.message
+          : 'That change could not be saved into the draft.'
       )
     }
   }
 
-  const ensureRoundTwoCodes = () => {
+  /**
+   * Turning the toggle off only stops showing the country values — it never
+   * removes them. Removing them is this button, and it is explicit.
+   */
+  const clearCountryValues = (keys: readonly string[]) => {
     try {
       const parsed = parseSnapshot(snapshot)
-      const currentCodes = Array.isArray(parsed.reason_codes)
-        ? parsed.reason_codes.filter(
-            (code): code is string => typeof code === 'string'
+      const thresholds =
+        parsed.thresholds &&
+        typeof parsed.thresholds === 'object' &&
+        !Array.isArray(parsed.thresholds)
+          ? { ...(parsed.thresholds as Record<string, unknown>) }
+          : {}
+      const affected = keys.filter((key) => {
+        const current = thresholds[key]
+        return (
+          Boolean(current) &&
+          typeof current === 'object' &&
+          !Array.isArray(current) &&
+          countryJurisdictions.some(
+            (country) => (current as Record<string, unknown>)[country] != null
           )
-        : []
-      parsed.reason_codes = Array.from(
-        new Set([...currentCodes, ...registeredReasonCodes])
-      ).sort()
+        )
+      })
+      // A country falls back to the "everywhere else" value. Without one there
+      // would be no value left, and this screen never invents one.
+      const missingDefault = affected.some((key) => {
+        const current = thresholds[key] as Record<string, unknown>
+        return current.default == null
+      })
+      if (missingDefault) {
+        setProblem(
+          'Fill in “Everywhere else” first. Without it, those countries would be left with no value at all.'
+        )
+        return
+      }
+      for (const key of affected) {
+        const current = thresholds[key] as Record<string, unknown>
+        thresholds[key] = { default: current.default }
+      }
+      parsed.thresholds = thresholds
       setSnapshot(JSON.stringify(parsed, null, 2))
       setMessage(
-        'The complete reason-code registry was merged without removing other configuration.'
+        'The country values are gone from this draft. Every country now uses the “Everywhere else” value.'
       )
     } catch (error) {
       setProblem(
-        error instanceof Error ? error.message : 'The snapshot JSON is invalid.'
+        error instanceof Error
+          ? error.message
+          : 'The country values could not be removed.'
+      )
+    }
+  }
+
+  // The orgs come from the draft itself, so a team added elsewhere shows up
+  // here without this screen having to know about it.
+  const managerChannelOrgs = useMemo(() => {
+    const value = readPath(snapshot, ['routing', 'manager_channel_by_org'])
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.keys(value as Record<string, unknown>)
+      : []
+  }, [snapshot])
+
+  /**
+   * Every setting on this screen writes through here, so a change made in a
+   * field and a change made in the text box end up in exactly the same place.
+   */
+  const setPath = (path: readonly string[], value: unknown) => {
+    try {
+      setSnapshot(writePath(snapshot, path, value))
+      setNotice(null)
+    } catch (error) {
+      setProblem(
+        error instanceof Error
+          ? error.message
+          : 'That setting could not be changed.'
       )
     }
   }
@@ -372,9 +777,20 @@ export default function PolicyStudioPage() {
     try {
       if (!baseVersion)
         throw new Error(
-          'Load the active policy snapshot before creating a draft.'
+          'Load the version in force before you save a draft, so the draft has something to start from.'
         )
       const configSnapshot = parseSnapshot(snapshot)
+      // Every registered reason must be present or the server refuses the
+      // draft, so the list is kept complete here rather than being one more
+      // thing to remember.
+      const currentCodes = Array.isArray(configSnapshot.reason_codes)
+        ? configSnapshot.reason_codes.filter(
+            (code): code is string => typeof code === 'string'
+          )
+        : []
+      configSnapshot.reason_codes = Array.from(
+        new Set([...currentCodes, ...registeredReasonCodes])
+      ).sort()
       await apiClient('/api/hr/policies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -384,14 +800,14 @@ export default function PolicyStudioPage() {
         }),
       })
       setMessage(
-        'Draft created. Run a simulation before approval and activation.'
+        'Draft saved. Test it next, then get it approved, then make it active.'
       )
       setSummary('')
       setDraftEditorOpen(false)
       await load()
     } catch (error) {
       setProblem(
-        error instanceof Error ? error.message : 'The snapshot JSON is invalid.'
+        error instanceof Error ? error.message : 'The draft could not be saved.'
       )
     } finally {
       setBusy(null)
@@ -412,7 +828,7 @@ export default function PolicyStudioPage() {
         )
         setSimulation(result.result)
         setMessage(
-          `Simulation completed for ${result.result.workers_evaluated} workers. No cases or notifications were created.`
+          `Test finished. ${result.result.workers_evaluated} people were checked. No cases were opened and nobody was contacted.`
         )
         window.setTimeout(() => simulationRef.current?.focus(), 0)
       } else if (policy.status === 'simulated') {
@@ -426,21 +842,21 @@ export default function PolicyStudioPage() {
         )
         setMessage(
           result.status === 'approved'
-            ? 'Approval is complete. The version is ready for Admin activation.'
-            : 'Approval recorded; another approval may still be required.'
+            ? 'Approved. An admin can now make this the active policy.'
+            : 'Your approval is recorded. Someone else still has to approve it.'
         )
       } else if (policy.status === 'approved') {
         await apiClient(`/api/hr/policies/${policy.version_id}/activate`, {
           method: 'POST',
         })
         setMessage(
-          'This version is now the active policy. Every check from here on is evaluated against it.'
+          'This version is now the active policy. Every check from here on uses it.'
         )
       }
       await load()
     } catch (error) {
       setProblem(
-        error instanceof Error ? error.message : 'The policy action failed.'
+        error instanceof Error ? error.message : 'That step did not go through.'
       )
     } finally {
       setBusy(null)
@@ -454,14 +870,14 @@ export default function PolicyStudioPage() {
         method: 'POST',
       })
       setMessage(
-        'The earlier snapshot was copied into a rollback draft that still requires simulation.'
+        'That version was copied into a new draft. It still has to be tested, approved and made active.'
       )
       await load()
     } catch (error) {
       setProblem(
         error instanceof Error
           ? error.message
-          : 'The rollback draft could not be created.'
+          : 'The copy could not be made into a draft.'
       )
     } finally {
       setBusy(null)
@@ -473,6 +889,14 @@ export default function PolicyStudioPage() {
     setBusy(`edit:${selectedPolicy.version_id}`)
     try {
       const configSnapshot = parseSnapshot(detailSnapshot)
+      const editedCodes = Array.isArray(configSnapshot.reason_codes)
+        ? configSnapshot.reason_codes.filter(
+            (code): code is string => typeof code === 'string'
+          )
+        : []
+      configSnapshot.reason_codes = Array.from(
+        new Set([...editedCodes, ...registeredReasonCodes])
+      ).sort()
       await apiClient(`/api/hr/policies/${selectedPolicy.version_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -486,12 +910,10 @@ export default function PolicyStudioPage() {
         change_summary: detailSummary,
       })
       await load()
-      setMessage(`Draft ${selectedPolicy.version_id} was updated.`)
+      setMessage(`Draft ${selectedPolicy.version_id} was saved.`)
     } catch (error) {
       setProblem(
-        error instanceof Error
-          ? error.message
-          : 'The draft could not be updated.'
+        error instanceof Error ? error.message : 'The draft could not be saved.'
       )
     } finally {
       setBusy(null)
@@ -508,15 +930,15 @@ export default function PolicyStudioPage() {
       })
       setMessage(
         hidden
-          ? `${policy.version_id} was hidden from the dashboard. The version stays in the database and in the audit history.`
-          : `${policy.version_id} is visible on the dashboard again.`
+          ? `${policy.version_id} is out of this list. It is still stored and still in the history.`
+          : `${policy.version_id} is back in this list.`
       )
       await load()
     } catch (error) {
       setProblem(
         error instanceof Error
           ? error.message
-          : 'The dashboard visibility could not be changed.'
+          : 'That version could not be hidden or brought back.'
       )
     } finally {
       setBusy(null)
@@ -527,7 +949,7 @@ export default function PolicyStudioPage() {
     setBusy(`baseline:${policy.version_id}`)
     try {
       await loadSnapshot(policy)
-      setSummary(`Draft derived from ${policy.version_id}`)
+      setSummary(`Draft based on ${policy.version_id}`)
       setDraftEditorOpen(true)
     } finally {
       setBusy(null)
@@ -566,68 +988,79 @@ export default function PolicyStudioPage() {
     if (!selectedPolicy || !detailSnapshot) return
     setSnapshot(detailSnapshot)
     setBaseVersion(selectedPolicy.version_id)
-    setSummary(`Draft derived from ${selectedPolicy.version_id}`)
+    setPerCountryOpen({})
+    setSummary(`Draft based on ${selectedPolicy.version_id}`)
     setSelectedPolicy(null)
     setDraftEditorOpen(true)
     setMessage(
-      `Policy baseline: ${selectedPolicy.version_id}. Edit the fields, then save a new draft.`
+      `Your draft starts from version ${selectedPolicy.version_id}. Change what you need, then save it.`
     )
   }
 
   const actionLabel = (policy: Policy) => {
-    if (policy.status === 'draft' && canDraft) return 'Simulate policy'
-    if (policy.status === 'simulated' && canApprove) return 'Approve policy'
-    if (policy.status === 'approved' && isAdmin) return 'Activate policy'
+    if (policy.status === 'draft' && canDraft) return 'Test this version'
+    if (policy.status === 'simulated' && canApprove)
+      return 'Approve this version'
+    if (policy.status === 'approved' && isAdmin)
+      return 'Make this the active policy'
     return null
   }
+
+  const draftFieldsDisabled = !canDraft || !baseVersion
+
+  const noticeCard = notice ? (
+    <Card
+      className={
+        notice.tone === 'problem'
+          ? 'border-destructive/40'
+          : 'border-brand-cornflower/30'
+      }
+    >
+      <CardContent
+        role={notice.tone === 'problem' ? 'alert' : 'status'}
+        className={`flex items-start gap-3 p-4 text-sm ${
+          notice.tone === 'problem'
+            ? 'text-destructive'
+            : 'text-muted-foreground'
+        }`}
+      >
+        {notice.tone === 'problem' ? (
+          <Icons.alertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
+        ) : (
+          <Icons.info className='mt-0.5 h-4 w-4 shrink-0 text-brand-cornflower' />
+        )}
+        <span>{notice.text}</span>
+      </CardContent>
+    </Card>
+  ) : null
 
   return (
     <div className='space-y-6'>
       <div className='flex flex-col justify-between gap-4 sm:flex-row sm:items-end'>
         <div>
           <p className='text-sm font-medium text-brand-purple'>
-            Governed configuration
+            Rules and their versions
           </p>
           <h1 className='text-display-3 font-bold tracking-tight text-brand-navy'>
             Policy Studio
           </h1>
-          <p className='mt-2 text-muted-foreground'>
-            Compliance, payroll, and manager accountability are governed through
-            immutable, simulatable, and auditable snapshots.
+          <p className='mt-2 max-w-2xl text-muted-foreground'>
+            This is where the rules the daily checks follow are kept: how long a
+            compliance document may sit unsigned, when first pay has to be
+            confirmed, how fast a manager has to act. Every change is saved as
+            its own version, and a version can be tested before it goes live.
           </p>
         </div>
         {canDraft && (
           <Button variant='gradient' onClick={() => setDraftEditorOpen(true)}>
-            Create policy draft
+            Create a draft
           </Button>
         )}
       </div>
 
-      {notice && (
-        <Card
-          className={
-            notice.tone === 'problem'
-              ? 'border-destructive/40'
-              : 'border-brand-cornflower/30'
-          }
-        >
-          <CardContent
-            role={notice.tone === 'problem' ? 'alert' : 'status'}
-            className={`flex items-start gap-3 p-4 text-sm ${
-              notice.tone === 'problem'
-                ? 'text-destructive'
-                : 'text-muted-foreground'
-            }`}
-          >
-            {notice.tone === 'problem' ? (
-              <Icons.alertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
-            ) : (
-              <Icons.info className='mt-0.5 h-4 w-4 shrink-0 text-brand-cornflower' />
-            )}
-            <span>{notice.text}</span>
-          </CardContent>
-        </Card>
-      )}
+      {/* While the draft dialog is open the same message is shown inside it,
+          so only one live region is ever announcing at a time. */}
+      {!draftEditorOpen && noticeCard}
 
       <div className='grid gap-6 xl:grid-cols-[1.05fr_.95fr]'>
         <div className='space-y-3'>
@@ -690,7 +1123,7 @@ export default function PolicyStudioPage() {
                         <DropdownMenuTrigger asChild>
                           <button
                             type='button'
-                            aria-label={`Policy actions for ${policy.version_id}`}
+                            aria-label={`More for version ${policy.version_id}`}
                             disabled={busy !== null}
                             /* Always visible: hiding it until hover puts
                                "hide" and "delete draft" out of reach on a
@@ -700,7 +1133,7 @@ export default function PolicyStudioPage() {
                             <Icons.moreVertical className='h-4 w-4' />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align='end' className='w-60'>
+                        <DropdownMenuContent align='end' className='w-64'>
                           <DropdownMenuItem
                             onSelect={() => void openPolicyDetails(policy)}
                           >
@@ -711,7 +1144,7 @@ export default function PolicyStudioPage() {
                             onSelect={() => void startDraftFromPolicy(policy)}
                           >
                             <Icons.copy className='mr-2 h-4 w-4' />
-                            Use as draft baseline
+                            Start a new draft from this
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           {isHidden ? (
@@ -719,7 +1152,7 @@ export default function PolicyStudioPage() {
                               onSelect={() => void setVisibility(policy, false)}
                             >
                               <Icons.eye className='mr-2 h-4 w-4' />
-                              Restore to dashboard
+                              Show in this list again
                             </DropdownMenuItem>
                           ) : (
                             <DropdownMenuItem
@@ -727,7 +1160,7 @@ export default function PolicyStudioPage() {
                               onSelect={() => void setVisibility(policy, true)}
                             >
                               <Icons.eyeOff className='mr-2 h-4 w-4' />
-                              Hide from dashboard
+                              Hide from this list
                             </DropdownMenuItem>
                           )}
                           {policy.status === 'draft' && (
@@ -751,7 +1184,7 @@ export default function PolicyStudioPage() {
                     <dl className='mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2'>
                       <div>
                         <dt className='font-semibold text-foreground'>
-                          Policy ID
+                          Version reference
                         </dt>
                         <dd className='break-all font-mono'>
                           {policy.version_id}
@@ -759,11 +1192,10 @@ export default function PolicyStudioPage() {
                       </div>
                       <div>
                         <dt className='font-semibold text-foreground'>
-                          Derived from
+                          Copied from
                         </dt>
                         <dd className='break-all font-mono'>
-                          {policy.parent_version_id ??
-                            'Initial policy baseline'}
+                          {policy.parent_version_id ?? 'The first version'}
                         </dd>
                       </div>
                     </dl>
@@ -802,7 +1234,7 @@ export default function PolicyStudioPage() {
                           disabled={busy !== null && busy !== policy.version_id}
                           onClick={() => rollback(policy)}
                         >
-                          Create rollback draft
+                          Copy into a new draft
                         </Button>
                       )}
                   </div>
@@ -814,308 +1246,815 @@ export default function PolicyStudioPage() {
             <Card>
               <CardContent className='space-y-1 p-5 text-sm'>
                 <p className='font-medium text-brand-navy'>
-                  No policy versions to show
+                  No versions to show
                 </p>
                 <p className='text-muted-foreground'>
                   {showHidden
                     ? 'Nothing is stored yet, hidden or otherwise.'
-                    : 'Versions hidden from the dashboard are still stored. Use “Show hidden versions” to review them.'}
+                    : 'Versions hidden from this list are still stored. Use “Show hidden versions” to see them.'}
                 </p>
               </CardContent>
             </Card>
           )}
         </div>
 
-        <div className='space-y-3'>
-          <h2
-            ref={simulationRef}
-            tabIndex={-1}
-            className='text-lg font-semibold text-brand-navy outline-none'
-          >
-            Simulation result
-          </h2>
-          {simulation ? (
+        <div className='space-y-6'>
+          <div className='space-y-3'>
+            <h2 className='text-lg font-semibold text-brand-navy'>
+              How a change goes live
+            </h2>
             <Card>
-              <CardHeader>
-                <CardTitle>Simulation impact</CardTitle>
-              </CardHeader>
-              <CardContent className='space-y-3'>
-                <p className='text-sm text-muted-foreground'>
-                  Compared with{' '}
-                  {simulation.active_policy_version ?? 'no active policy'}.
-                </p>
-                {Object.keys(simulation.delta_by_code).length === 0 ? (
-                  <p className='text-sm'>
-                    No finding changes were detected in the evaluated cohort.
+              <CardContent className='p-5'>
+                <ol className='space-y-3'>
+                  {goLiveSteps.map((step, index) => (
+                    <li key={step.title} className='flex gap-3'>
+                      <span
+                        aria-hidden='true'
+                        className='mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-navy/10 text-xs font-semibold tabular-nums text-brand-navy'
+                      >
+                        {index + 1}
+                      </span>
+                      <span className='text-sm'>
+                        <span className='font-medium text-brand-navy'>
+                          {step.title}.
+                        </span>{' '}
+                        <span className='text-muted-foreground'>
+                          {step.detail}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className='space-y-3'>
+            <h2
+              ref={simulationRef}
+              tabIndex={-1}
+              className='text-lg font-semibold text-brand-navy outline-none'
+            >
+              Test result
+            </h2>
+            {simulation ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>What this version would change</CardTitle>
+                </CardHeader>
+                <CardContent className='space-y-3'>
+                  <p className='text-sm text-muted-foreground'>
+                    {simulation.workers_evaluated} people were checked, compared
+                    with{' '}
+                    {simulation.active_policy_version
+                      ? `the policy in force (${simulation.active_policy_version})`
+                      : 'no policy in force yet'}
+                    .
                   </p>
-                ) : (
-                  <div className='space-y-2'>
-                    {Object.entries(simulation.delta_by_code).map(
-                      ([code, delta]) => (
-                        <div
-                          key={code}
-                          className='flex justify-between gap-4 text-sm'
-                        >
-                          <span className='font-mono text-xs'>{code}</span>
-                          <span
-                            className={`tabular-nums ${
-                              delta > 0 ? 'text-amber-700' : 'text-emerald-700'
-                            }`}
-                          >
-                            {delta > 0 ? '+' : ''}
-                            {delta}
-                          </span>
-                        </div>
-                      )
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className='p-5 text-sm text-muted-foreground'>
-                Run a draft simulation to compare its findings with the active
-                policy. The result will appear here without creating cases or
-                sending notifications.
-              </CardContent>
-            </Card>
-          )}
+                  {Object.keys(simulation.delta_by_code).length === 0 ? (
+                    <p className='text-sm'>
+                      Nothing would change for the people checked.
+                    </p>
+                  ) : (
+                    <>
+                      <p className='text-xs text-muted-foreground'>
+                        A plus means this version would raise more of these; a
+                        minus means fewer.
+                      </p>
+                      <div className='space-y-2'>
+                        {Object.entries(simulation.delta_by_code).map(
+                          ([code, delta]) => (
+                            <div
+                              key={code}
+                              className='flex items-start justify-between gap-4 text-sm'
+                            >
+                              <span>{reasonCodeLabel(code)}</span>
+                              <span
+                                className={`tabular-nums ${
+                                  delta > 0
+                                    ? 'text-amber-700'
+                                    : 'text-emerald-700'
+                                }`}
+                              >
+                                {delta > 0 ? '+' : ''}
+                                {delta}
+                              </span>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className='p-5 text-sm text-muted-foreground'>
+                  Test a draft to see how it would change what the checks pick
+                  up, next to the policy in force. The result appears here. No
+                  cases are opened and nobody is contacted.
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
 
         <Dialog open={draftEditorOpen} onOpenChange={setDraftEditorOpen}>
-          <DialogContent className='max-h-[calc(100dvh-10rem)] max-w-5xl overflow-y-auto'>
+          <DialogContent className='max-h-[calc(100dvh-10rem)] max-w-3xl overflow-y-auto'>
             <DialogHeader>
-              <DialogTitle>Create policy draft</DialogTitle>
+              <DialogTitle>Create a draft</DialogTitle>
               <DialogDescription>
-                Adjust governed Round 2 fields or the complete JSON snapshot,
-                then save a new draft for simulation.
+                A draft is a full copy of the version you started from, so
+                anything you do not touch stays exactly as it is. Nothing you
+                write here takes effect until the draft has been tested,
+                approved and made active.
               </DialogDescription>
             </DialogHeader>
-            <div className='grid gap-4 lg:grid-cols-2'>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Round 2 policy fields</CardTitle>
-                </CardHeader>
-                <CardContent className='space-y-6'>
-                  <p className='text-sm text-muted-foreground'>
-                    Changes below are merged into the JSON snapshot. Values must
-                    come from an approved HR policy.
+
+            {noticeCard}
+
+            <form className='space-y-6' onSubmit={create}>
+              <section className='space-y-2'>
+                <h3 className='text-sm font-semibold uppercase tracking-wide text-muted-foreground'>
+                  What is changing
+                </h3>
+                <div className='space-y-2 rounded-lg border p-4'>
+                  <Label htmlFor='draft-change-summary'>
+                    Describe the change
+                  </Label>
+                  <Input
+                    id='draft-change-summary'
+                    value={summary}
+                    onChange={(event) => setSummary(event.target.value)}
+                    minLength={3}
+                    placeholder='For example: give Malaysia three more days to confirm first pay'
+                    required
+                    disabled={draftFieldsDisabled}
+                    aria-describedby='draft-change-summary-hint'
+                  />
+                  <p
+                    id='draft-change-summary-hint'
+                    className='text-xs text-muted-foreground'
+                  >
+                    This sentence is what approvers and the history will see, so
+                    say what changed and why.
                   </p>
-                  {policyGroups.map((group) => (
-                    <section key={group.title} className='space-y-3'>
+                  <p className='pt-1 text-xs text-muted-foreground'>
+                    <span className='font-semibold text-foreground'>
+                      Copied from:
+                    </span>{' '}
+                    <span className='font-mono'>
+                      {baseVersion ?? 'Nothing loaded yet'}
+                    </span>
+                  </p>
+                </div>
+              </section>
+
+              <section className='space-y-3'>
+                <h3 className='text-sm font-semibold uppercase tracking-wide text-muted-foreground'>
+                  The settings that matter
+                </h3>
+
+                {thresholdGroups.map((group) => {
+                  const keys = group.fields.map(([key]) => key)
+                  const overridden = countriesWithOwnValue(snapshot, keys)
+                  const showCountries =
+                    perCountryOpen[group.id] ?? overridden.length > 0
+                  const toggleId = `per-country-${group.id}`
+                  return (
+                    <section
+                      key={group.id}
+                      className='space-y-4 rounded-lg border p-4'
+                    >
                       <div>
-                        <h3 className='font-semibold text-brand-navy'>
+                        <h4 className='font-semibold text-brand-navy'>
                           {group.title}
-                        </h3>
+                        </h4>
                         <p className='text-xs text-muted-foreground'>
                           {group.description}
                         </p>
                       </div>
-                      {group.fields.map(([key, label]) => (
-                        <div key={key} className='space-y-2'>
-                          <Label>{label}</Label>
-                          <div className='grid grid-cols-3 gap-2 sm:grid-cols-6'>
-                            {jurisdictions.map((jurisdiction) => (
-                              <label
-                                key={jurisdiction}
-                                className='space-y-1 text-xs text-muted-foreground'
-                              >
-                                <span>
-                                  {jurisdiction === 'default'
-                                    ? 'Default'
-                                    : jurisdiction}
-                                </span>
-                                <Input
-                                  type='number'
-                                  min={0}
-                                  value={thresholdValue(
-                                    snapshot,
-                                    key,
-                                    jurisdiction
-                                  )}
-                                  onChange={(event) =>
-                                    setThreshold(
-                                      key,
-                                      event.target.value,
-                                      jurisdiction
-                                    )
-                                  }
-                                  aria-label={`${label} ${jurisdiction}`}
-                                />
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </section>
-                  ))}
-                  <section className='space-y-3'>
-                    <div>
-                      <h3 className='font-semibold text-brand-navy'>
-                        Manager & cohort safeguards
-                      </h3>
-                      <p className='text-xs text-muted-foreground'>
-                        Cadence, action deadlines, reminders, and bottleneck
-                        thresholds.
-                      </p>
-                    </div>
-                    <div className='space-y-3'>
-                      {managerJurisdictionThresholds.map(([key, label]) => (
-                        <div key={key} className='space-y-2'>
-                          <Label>{label}</Label>
-                          <div className='grid grid-cols-3 gap-2 sm:grid-cols-6'>
-                            {jurisdictions.map((jurisdiction) => (
-                              <label
-                                key={jurisdiction}
-                                className='space-y-1 text-xs text-muted-foreground'
-                              >
-                                <span>
-                                  {jurisdiction === 'default'
-                                    ? 'Default'
-                                    : jurisdiction}
-                                </span>
-                                <Input
-                                  type='number'
-                                  min={0}
-                                  value={thresholdValue(
-                                    snapshot,
-                                    key,
-                                    jurisdiction
-                                  )}
-                                  onChange={(event) =>
-                                    setThreshold(
-                                      key,
-                                      event.target.value,
-                                      jurisdiction
-                                    )
-                                  }
-                                  aria-label={`${label} ${jurisdiction}`}
-                                />
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className='grid gap-3 sm:grid-cols-2'>
-                      {globalThresholds.map(([key, label]) => (
-                        <label
-                          key={key}
-                          className='space-y-1 text-xs text-muted-foreground'
-                        >
-                          <span>{label}</span>
-                          <Input
-                            type='number'
-                            min={0}
-                            value={thresholdValue(snapshot, key)}
-                            onChange={(event) =>
-                              setThreshold(key, event.target.value)
-                            }
-                            aria-label={label}
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  </section>
-                  <Button
-                    type='button'
-                    size='sm'
-                    variant='outline'
-                    onClick={ensureRoundTwoCodes}
-                  >
-                    Complete the reason-code registry
-                  </Button>
-                </CardContent>
-              </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Create a draft</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <form className='space-y-4' onSubmit={create}>
-                    <div className='space-y-2'>
-                      <Label htmlFor='draft-change-summary'>
-                        Change summary
-                      </Label>
-                      <Input
-                        id='draft-change-summary'
-                        value={summary}
-                        onChange={(event) => setSummary(event.target.value)}
-                        minLength={3}
-                        placeholder='For example: shorten the payroll cutoff for MY'
-                        required
-                        disabled={!canDraft || !baseVersion}
-                        aria-describedby='draft-change-summary-hint'
+                      <div className='flex items-start justify-between gap-4 rounded-md bg-slate-50 p-3'>
+                        <div className='space-y-1'>
+                          <Label htmlFor={toggleId}>
+                            Use different values per country
+                          </Label>
+                          <p
+                            id={`${toggleId}-hint`}
+                            className='text-xs text-muted-foreground'
+                          >
+                            {showCountries
+                              ? 'Each country can have its own value. A country left empty follows “Everywhere else”.'
+                              : 'One value is used everywhere.'}
+                          </p>
+                        </div>
+                        <Switch
+                          id={toggleId}
+                          checked={showCountries}
+                          disabled={draftFieldsDisabled}
+                          aria-describedby={`${toggleId}-hint`}
+                          onCheckedChange={(checked) =>
+                            setPerCountryOpen((current) => ({
+                              ...current,
+                              [group.id]: checked,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      {group.fields.map(([key, label]) =>
+                        showCountries ? (
+                          <div key={key} className='space-y-2'>
+                            <p className='text-sm font-medium leading-none'>
+                              {label}
+                            </p>
+                            <div className='grid grid-cols-3 gap-2 sm:grid-cols-6'>
+                              {jurisdictions.map((jurisdiction) => (
+                                <div key={jurisdiction} className='space-y-1'>
+                                  <Label
+                                    htmlFor={`threshold-${key}-${jurisdiction}`}
+                                    className='block text-xs font-normal text-muted-foreground'
+                                  >
+                                    {jurisdictionLabels[jurisdiction]}
+                                  </Label>
+                                  <Input
+                                    id={`threshold-${key}-${jurisdiction}`}
+                                    type='number'
+                                    min={0}
+                                    value={thresholdValue(
+                                      snapshot,
+                                      key,
+                                      jurisdiction
+                                    )}
+                                    disabled={draftFieldsDisabled}
+                                    onChange={(event) =>
+                                      setThreshold(
+                                        key,
+                                        event.target.value,
+                                        jurisdiction
+                                      )
+                                    }
+                                    aria-label={`${label} — ${jurisdictionLabels[jurisdiction]}`}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div key={key} className='space-y-2'>
+                            <Label htmlFor={`threshold-${key}-default`}>
+                              {label}
+                            </Label>
+                            <Input
+                              id={`threshold-${key}-default`}
+                              type='number'
+                              min={0}
+                              className='w-40'
+                              value={thresholdValue(snapshot, key, 'default')}
+                              disabled={draftFieldsDisabled}
+                              onChange={(event) =>
+                                setThreshold(key, event.target.value, 'default')
+                              }
+                            />
+                          </div>
+                        )
+                      )}
+
+                      {/* Hiding the country inputs must never read as
+                          "the country values are gone" — they still apply. */}
+                      {!showCountries && overridden.length > 0 && (
+                        <div className='space-y-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900'>
+                          <p>
+                            {listSentence(
+                              overridden.map(
+                                (country) => jurisdictionLabels[country]
+                              )
+                            )}{' '}
+                            still {overridden.length === 1 ? 'has' : 'have'} a
+                            value of its own, saved in this draft. The value
+                            above does not apply there until you remove{' '}
+                            {overridden.length === 1 ? 'it' : 'them'}.
+                          </p>
+                          <Button
+                            type='button'
+                            size='sm'
+                            variant='outline'
+                            disabled={draftFieldsDisabled}
+                            onClick={() => clearCountryValues(keys)}
+                          >
+                            Remove the country values
+                          </Button>
+                        </div>
+                      )}
+                    </section>
+                  )
+                })}
+
+                <section className='space-y-4 rounded-lg border p-4'>
+                  <div>
+                    <h4 className='font-semibold text-brand-navy'>
+                      When a whole group is held up
+                    </h4>
+                    <p className='text-xs text-muted-foreground'>
+                      How big a hold-up has to be before it is worth flagging.
+                      These are the same everywhere.
+                    </p>
+                  </div>
+                  <div className='grid gap-4 sm:grid-cols-2'>
+                    {globalThresholds.map(([key, label]) => (
+                      <div key={key} className='space-y-1'>
+                        <Label
+                          htmlFor={`threshold-${key}`}
+                          className='block text-xs font-normal text-muted-foreground'
+                        >
+                          {label}
+                        </Label>
+                        <Input
+                          id={`threshold-${key}`}
+                          type='number'
+                          min={0}
+                          value={thresholdValue(snapshot, key)}
+                          disabled={draftFieldsDisabled}
+                          onChange={(event) =>
+                            setThreshold(key, event.target.value)
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className='space-y-4 rounded-lg border p-4'>
+                  <div>
+                    <h4 className='font-semibold text-brand-navy'>
+                      Day one and task follow-up
+                    </h4>
+                    <p className='text-xs text-muted-foreground'>
+                      How long something can sit before it becomes a case.
+                    </p>
+                  </div>
+                  <div className='grid gap-4 sm:grid-cols-2'>
+                    <NumberSetting
+                      snapshot={snapshot}
+                      path={['thresholds', 'provisioning_blocked_grace_days']}
+                      label='Grace after day one for missing access'
+                      hint='Access should exist by the end of day one. The grace absorbs time-zone differences.'
+                      suffix='days'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                    <NumberSetting
+                      snapshot={snapshot}
+                      path={['thresholds', 'task_stalled_overdue_days']}
+                      label='Days past due before a task counts as stalled'
+                      hint='Long enough to be a real signal, short enough to still be worth acting on.'
+                      suffix='days'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                    <NumberSetting
+                      snapshot={snapshot}
+                      path={['thresholds', 'catch_rate_sla_days']}
+                      label='Days we give ourselves to act on a signal'
+                      hint='Used to measure whether we responded in time. Usually matches the line above.'
+                      suffix='days'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                  </div>
+                  <ListSetting
+                    snapshot={snapshot}
+                    path={['thresholds', 'compliance_step_terms']}
+                    label='Onboarding steps that count as compliance'
+                    hint='Written out in full, so renaming a step elsewhere cannot quietly change what is checked.'
+                    addLabel='Add a step'
+                    disabled={draftFieldsDisabled}
+                    onChange={setPath}
+                  />
+                </section>
+
+                <section className='space-y-4 rounded-lg border p-4'>
+                  <div>
+                    <h4 className='font-semibold text-brand-navy'>
+                      Engagement and sensitive disclosures
+                    </h4>
+                    <p className='text-xs text-muted-foreground'>
+                      When a pulse response is low enough to look at, and how
+                      sure the system must be before it acts on its own.
+                    </p>
+                  </div>
+                  <div className='grid gap-4 sm:grid-cols-2'>
+                    <NumberSetting
+                      snapshot={snapshot}
+                      path={['thresholds', 'engagement_low_score']}
+                      label='Pulse score at or below this counts as low'
+                      hint='The scale runs 0 to 10.'
+                      max={10}
+                      suffix='out of 10'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                    <NumberSetting
+                      snapshot={snapshot}
+                      path={[
+                        'thresholds',
+                        'disclosure_classifier_min_confidence',
+                      ]}
+                      label='How sure before acting without a person'
+                      hint='Below this, a sensitive disclosure always goes to a person instead.'
+                      step={0.05}
+                      max={1}
+                      suffix='0 to 1'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                  </div>
+                </section>
+
+                <section className='space-y-4 rounded-lg border p-4'>
+                  <div>
+                    <h4 className='font-semibold text-brand-navy'>
+                      Possible duplicate people
+                    </h4>
+                    <p className='text-xs text-muted-foreground'>
+                      Treating two real people as one is worse than one extra
+                      check, so the bar to merge is deliberately high. Between
+                      the two figures, a person is asked to confirm.
+                    </p>
+                  </div>
+                  <div className='grid gap-4 sm:grid-cols-2'>
+                    <NumberSetting
+                      snapshot={snapshot}
+                      path={['thresholds', 'dedup_confidence_threshold']}
+                      label='Same person at or above'
+                      step={0.05}
+                      max={1}
+                      suffix='0 to 1'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                    <NumberSetting
+                      snapshot={snapshot}
+                      path={['thresholds', 'dedup_flag_band_low']}
+                      label='Definitely a new person below'
+                      step={0.05}
+                      max={1}
+                      suffix='0 to 1'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                    <NumberSetting
+                      snapshot={snapshot}
+                      path={['thresholds', 'dedup_hire_date_proximity_days']}
+                      label='Only compare start dates this close together'
+                      hint='A tight window catches the same intake sent twice, not two people who started in the same month.'
+                      suffix='days'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                  </div>
+                </section>
+              </section>
+
+              <details className='group rounded-lg border bg-slate-50/60'>
+                <summary className='flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cornflower/50 [&::-webkit-details-marker]:hidden'>
+                  <span>
+                    <span className='text-sm font-semibold text-brand-navy'>
+                      Messages, channels and timing
+                    </span>
+                    <span className='block text-xs text-muted-foreground'>
+                      What we send, where it goes, and what happens when a
+                      message does not get through.
+                    </span>
+                  </span>
+                  <Icons.chevronDown className='h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180' />
+                </summary>
+                <div className='space-y-6 border-t p-4'>
+                  <div className='space-y-3'>
+                    <p className='text-sm font-medium text-brand-navy'>
+                      What we send
+                    </p>
+                    <p className='text-xs text-muted-foreground'>
+                      Anything inside {'{{ }}'} is filled in when the message is
+                      sent. The confidential alert deliberately carries no
+                      details of the disclosure — only a link to the case.
+                    </p>
+                    <TextAreaSetting
+                      snapshot={snapshot}
+                      path={['templates', 'manager_nudge']}
+                      label='Reminder to a manager'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                    <TextAreaSetting
+                      snapshot={snapshot}
+                      path={['templates', 'it_escalation']}
+                      label='Escalation to IT'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                    <TextAreaSetting
+                      snapshot={snapshot}
+                      path={['templates', 'confidential_alert']}
+                      label='Confidential alert to HR'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                  </div>
+
+                  <div className='space-y-3'>
+                    <p className='text-sm font-medium text-brand-navy'>
+                      Where it goes
+                    </p>
+                    <p className='text-xs text-muted-foreground'>
+                      Slack channel IDs. The confidential channel is a single
+                      restricted channel on purpose and must never be a
+                      manager&rsquo;s channel.
+                    </p>
+                    <div className='grid gap-4 sm:grid-cols-2'>
+                      {managerChannelOrgs.map((org) => (
+                        <TextSetting
+                          key={org}
+                          snapshot={snapshot}
+                          path={['routing', 'manager_channel_by_org', org]}
+                          label={`Managers in ${org}`}
+                          disabled={draftFieldsDisabled}
+                          onChange={setPath}
+                        />
+                      ))}
+                      <TextSetting
+                        snapshot={snapshot}
+                        path={['routing', 'confidential_channel']}
+                        label='Confidential HR channel'
+                        disabled={draftFieldsDisabled}
+                        onChange={setPath}
                       />
-                      <p
-                        id='draft-change-summary-hint'
-                        className='text-xs text-muted-foreground'
+                      <TextSetting
+                        snapshot={snapshot}
+                        path={['routing', 'it_escalation_channel']}
+                        label='IT escalation channel'
+                        disabled={draftFieldsDisabled}
+                        onChange={setPath}
+                      />
+                    </div>
+                  </div>
+
+                  <div className='space-y-3'>
+                    <p className='text-sm font-medium text-brand-navy'>
+                      When a message does not get through
+                    </p>
+                    <div className='grid gap-4 sm:grid-cols-2'>
+                      <NumberSetting
+                        snapshot={snapshot}
+                        path={['retry', 'max_attempts']}
+                        label='Times to try'
+                        disabled={draftFieldsDisabled}
+                        onChange={setPath}
+                      />
+                      <ListSetting
+                        snapshot={snapshot}
+                        path={['retry', 'backoff_seconds']}
+                        label='Wait between tries (seconds)'
+                        hint='A failed message is never dropped quietly — once the tries run out it is escalated.'
+                        addLabel='Add a wait'
+                        numeric
+                        disabled={draftFieldsDisabled}
+                        onChange={setPath}
+                      />
+                    </div>
+                  </div>
+
+                  <div className='space-y-3'>
+                    <p className='text-sm font-medium text-brand-navy'>
+                      Dates in incoming files
+                    </p>
+                    <div className='space-y-2'>
+                      <Label
+                        htmlFor='ambiguous-date-order'
+                        className='block text-xs font-normal text-muted-foreground'
                       >
-                        This sentence is what reviewers and the audit history
-                        see, so name what changed and why.
-                      </p>
-                    </div>
-                    <div className='space-y-2'>
-                      <Label htmlFor='policy-json'>
-                        Complete snapshot (advanced)
+                        Read 03/04 as
                       </Label>
-                      <textarea
-                        id='policy-json'
-                        value={snapshot}
-                        onChange={(event) => setSnapshot(event.target.value)}
-                        className='min-h-72 w-full rounded-lg border border-input bg-white p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-brand-cornflower/50'
-                        aria-label='Policy configuration JSON'
-                        spellCheck={false}
-                        disabled={!canDraft || !baseVersion}
-                      />
-                      <p className='text-xs text-muted-foreground'>
-                        <span className='font-semibold text-foreground'>
-                          Policy baseline:
-                        </span>{' '}
-                        <span className='font-mono'>
-                          {baseVersion ?? 'Not loaded'}
-                        </span>
-                        . A draft is a complete snapshot; routing,
-                        normalization, templates, retry settings, and active
-                        guardrails are preserved.
-                      </p>
-                    </div>
-                    <Button
-                      type='submit'
-                      variant='gradient'
-                      loading={busy === 'create'}
-                      disabled={!canDraft || !baseVersion}
-                    >
-                      Save as draft
-                    </Button>
-                    {canDraft && !baseVersion && (
-                      <Button
-                        type='button'
-                        variant='outline'
-                        onClick={() => {
-                          const active = policies.find(
-                            (policy) => policy.status === 'active'
+                      <Select
+                        value={
+                          stringAt(snapshot, [
+                            'normalization',
+                            'ambiguous_numeric_date_order',
+                          ]) || 'DMY'
+                        }
+                        disabled={draftFieldsDisabled}
+                        onValueChange={(value) =>
+                          setPath(
+                            ['normalization', 'ambiguous_numeric_date_order'],
+                            value
                           )
-                          if (active) void loadSnapshot(active)
-                        }}
-                        disabled={
-                          !policies.some((policy) => policy.status === 'active')
                         }
                       >
-                        Reload active snapshot
-                      </Button>
-                    )}
-                    {!canDraft && (
+                        <SelectTrigger
+                          id='ambiguous-date-order'
+                          className='w-64'
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value='DMY'>
+                            Day first — 3 April
+                          </SelectItem>
+                          <SelectItem value='MDY'>
+                            Month first — 4 March
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
                       <p className='text-xs text-muted-foreground'>
-                        Your role can only review or approve policies.
+                        A date that does not fit this order is never quietly
+                        reinterpreted — it is raised for a person to settle.
                       </p>
-                    )}
-                  </form>
-                </CardContent>
-              </Card>
-            </div>
+                    </div>
+                    <ListSetting
+                      snapshot={snapshot}
+                      path={['normalization', 'date_formats_accepted']}
+                      label='Date layouts we accept'
+                      hint='Anything not on this list is treated as unreadable rather than guessed.'
+                      addLabel='Add a layout'
+                      disabled={draftFieldsDisabled}
+                      onChange={setPath}
+                    />
+                  </div>
+                </div>
+              </details>
+
+              <details className='group rounded-lg border bg-slate-50/60'>
+                <summary className='flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cornflower/50 [&::-webkit-details-marker]:hidden'>
+                  <span>
+                    <span className='text-sm font-semibold text-brand-navy'>
+                      Rehearsals, and the raw file
+                    </span>
+                    <span className='block text-xs text-muted-foreground'>
+                      Only needed to record a demo, or to check the file behind
+                      everything above.
+                    </span>
+                  </span>
+                  <Icons.chevronDown className='h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180' />
+                </summary>
+                <div className='space-y-6 border-t p-4'>
+                  <div className='space-y-3'>
+                    <p className='text-sm font-medium text-brand-navy'>
+                      Pretend today is a different date
+                    </p>
+                    <div className='flex flex-wrap items-end gap-3'>
+                      <div className='space-y-1'>
+                        <Label
+                          htmlFor='as-of-date'
+                          className='block text-xs font-normal text-muted-foreground'
+                        >
+                          Run every check as if today were
+                        </Label>
+                        <Input
+                          id='as-of-date'
+                          type='date'
+                          className='w-52'
+                          disabled={draftFieldsDisabled}
+                          value={stringAt(snapshot, ['as_of_date']).slice(0, 10)}
+                          onChange={(event) =>
+                            setPath(
+                              ['as_of_date'],
+                              event.target.value === ''
+                                ? null
+                                : event.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      {stringAt(snapshot, ['as_of_date']) !== '' && (
+                        <Button
+                          type='button'
+                          size='sm'
+                          variant='outline'
+                          disabled={draftFieldsDisabled}
+                          onClick={() => setPath(['as_of_date'], null)}
+                        >
+                          Go back to today
+                        </Button>
+                      )}
+                    </div>
+                    <p className='text-xs text-muted-foreground'>
+                      Leave this empty for normal use, so every deadline is
+                      measured against the real date. Pinning a date is for a
+                      rehearsal or a recorded demo — while it is set, the checks
+                      behave as if that day never changes.
+                    </p>
+                  </div>
+
+                  <div className='space-y-3'>
+                    <div className='flex items-start justify-between gap-4'>
+                      <div className='space-y-1'>
+                        <Label htmlFor='demo-mode'>Demo mode</Label>
+                        <p
+                          id='demo-mode-hint'
+                          className='max-w-md text-xs text-muted-foreground'
+                        >
+                          Uses the shorter waiting times below instead of the
+                          normal ones, so a live demo is not spent watching
+                          nothing happen.
+                        </p>
+                      </div>
+                      <Switch
+                        id='demo-mode'
+                        aria-describedby='demo-mode-hint'
+                        disabled={draftFieldsDisabled}
+                        checked={readPath(snapshot, ['demo_mode']) === true}
+                        onCheckedChange={(checked) =>
+                          setPath(['demo_mode'], checked)
+                        }
+                      />
+                    </div>
+                    <div className='grid gap-4 sm:grid-cols-2'>
+                      <NumberSetting
+                        snapshot={snapshot}
+                        path={['retry_demo_profile', 'max_attempts']}
+                        label='Times to try, in demo mode'
+                        disabled={draftFieldsDisabled}
+                        onChange={setPath}
+                      />
+                      <ListSetting
+                        snapshot={snapshot}
+                        path={['retry_demo_profile', 'backoff_seconds']}
+                        label='Wait between tries, in demo mode (seconds)'
+                        addLabel='Add a wait'
+                        numeric
+                        disabled={draftFieldsDisabled}
+                        onChange={setPath}
+                      />
+                    </div>
+                  </div>
+
+                  <div className='space-y-1'>
+                    <p className='text-sm font-medium text-brand-navy'>
+                      Reasons a case can be raised for
+                    </p>
+                    <p className='text-xs text-muted-foreground'>
+                      All {registeredReasonCodes.length} reasons are kept in
+                      this draft for you. A policy that recognises fewer would
+                      be refused, so there is nothing to choose here.
+                    </p>
+                  </div>
+
+                  <div className='space-y-2'>
+                    <Label htmlFor='policy-json'>
+                      Every setting in this draft, as text
+                    </Label>
+                    <p className='text-xs text-muted-foreground'>
+                      Every setting in this policy now has a field above, so you
+                      should never have to type in here. It is kept as a way to
+                      read the whole draft at once, and as a last resort.
+                    </p>
+                    <textarea
+                      id='policy-json'
+                      value={snapshot}
+                      onChange={(event) => setSnapshot(event.target.value)}
+                      className='min-h-72 w-full rounded-lg border border-input bg-white p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-cornflower/50'
+                      spellCheck={false}
+                      disabled={draftFieldsDisabled}
+                    />
+                  </div>
+                </div>
+              </details>
+
+              <DialogFooter className='gap-2 border-t pt-4 sm:space-x-0'>
+                {!canDraft && (
+                  <p className='text-xs text-muted-foreground'>
+                    Your access lets you review and approve versions, but not
+                    write them.
+                  </p>
+                )}
+                {canDraft && !baseVersion && (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    onClick={() => {
+                      const active = policies.find(
+                        (policy) => policy.status === 'active'
+                      )
+                      if (active) void loadSnapshot(active)
+                    }}
+                    disabled={
+                      !policies.some((policy) => policy.status === 'active')
+                    }
+                  >
+                    Load the version in force
+                  </Button>
+                )}
+                <Button
+                  type='submit'
+                  variant='gradient'
+                  loading={busy === 'create'}
+                  disabled={draftFieldsDisabled}
+                >
+                  Save as a draft
+                </Button>
+              </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
       </div>
@@ -1126,32 +2065,32 @@ export default function PolicyStudioPage() {
           if (!open && busy === null) setSelectedPolicy(null)
         }}
       >
-        <DialogContent className='max-h-[calc(100dvh-10rem)] max-w-4xl overflow-y-auto'>
+        <DialogContent className='max-h-[calc(100dvh-10rem)] max-w-3xl overflow-y-auto'>
           {selectedPolicy && (
             <>
               <DialogHeader>
                 <PolicyStatusBadge status={selectedPolicy.status} />
-                <DialogTitle>Policy details</DialogTitle>
+                <DialogTitle>About this version</DialogTitle>
                 <DialogDescription>
-                  Review metadata and the complete governed configuration
-                  snapshot. Drafts remain editable until they are simulated.
+                  What this version is, who wrote it, and when. A draft can
+                  still be changed; anything past that is kept as it is, for the
+                  record.
                 </DialogDescription>
               </DialogHeader>
 
               <dl className='grid gap-3 rounded-lg border bg-slate-50 p-4 text-sm sm:grid-cols-2'>
                 <div>
-                  <dt className='font-semibold text-brand-navy'>Policy ID</dt>
+                  <dt className='font-semibold text-brand-navy'>
+                    Version reference
+                  </dt>
                   <dd className='break-all font-mono text-xs text-muted-foreground'>
                     {selectedPolicy.version_id}
                   </dd>
                 </div>
                 <div>
-                  <dt className='font-semibold text-brand-navy'>
-                    Derived from
-                  </dt>
+                  <dt className='font-semibold text-brand-navy'>Copied from</dt>
                   <dd className='break-all font-mono text-xs text-muted-foreground'>
-                    {selectedPolicy.parent_version_id ??
-                      'Initial policy baseline'}
+                    {selectedPolicy.parent_version_id ?? 'The first version'}
                   </dd>
                 </div>
                 <div>
@@ -1169,27 +2108,19 @@ export default function PolicyStudioPage() {
                 {selectedPolicy.activated_at && (
                   <div>
                     <dt className='font-semibold text-brand-navy'>
-                      Activated at
+                      Went live at
                     </dt>
                     <dd className='text-muted-foreground'>
                       {formatTimestamp(selectedPolicy.activated_at)}
                     </dd>
                   </div>
                 )}
-                {selectedPolicy.snapshot_hash && (
-                  <div>
-                    <dt className='font-semibold text-brand-navy'>
-                      Snapshot hash
-                    </dt>
-                    <dd className='break-all font-mono text-xs text-muted-foreground'>
-                      {selectedPolicy.snapshot_hash}
-                    </dd>
-                  </div>
-                )}
               </dl>
 
               <div className='space-y-2'>
-                <Label htmlFor='detail-change-summary'>Change summary</Label>
+                <Label htmlFor='detail-change-summary'>
+                  What this version changed
+                </Label>
                 <Input
                   id='detail-change-summary'
                   value={detailSummary}
@@ -1203,31 +2134,57 @@ export default function PolicyStudioPage() {
                 />
               </div>
 
-              <div className='space-y-2'>
-                <Label htmlFor='detail-policy-json'>Full policy snapshot</Label>
-                <textarea
-                  id='detail-policy-json'
-                  value={
-                    detailLoading
-                      ? 'Loading the complete snapshot…'
-                      : detailSnapshot
-                  }
-                  onChange={(event) => setDetailSnapshot(event.target.value)}
-                  className='min-h-80 w-full rounded-lg border border-input bg-white p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-cornflower/50 disabled:bg-slate-50'
-                  aria-label='Full policy snapshot JSON'
-                  spellCheck={false}
-                  disabled={
-                    detailLoading ||
-                    selectedPolicy.status !== 'draft' ||
-                    !canDraft
-                  }
-                />
-                <p className='text-xs text-muted-foreground'>
-                  {selectedPolicy.status === 'draft' && canDraft
-                    ? 'This draft can be edited or deleted until simulation starts.'
-                    : 'This lifecycle snapshot is read-only to preserve its audit history.'}
-                </p>
-              </div>
+              <details className='group rounded-lg border bg-slate-50/60'>
+                <summary className='flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cornflower/50 [&::-webkit-details-marker]:hidden'>
+                  <span>
+                    <span className='text-sm font-semibold text-brand-navy'>
+                      Advanced, and optional
+                    </span>
+                    <span className='block text-xs text-muted-foreground'>
+                      Every setting in this version, and its fingerprint.
+                    </span>
+                  </span>
+                  <Icons.chevronDown className='h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180' />
+                </summary>
+                <div className='space-y-4 border-t p-4'>
+                  {selectedPolicy.snapshot_hash && (
+                    <div>
+                      <p className='text-sm font-semibold text-brand-navy'>
+                        Fingerprint
+                      </p>
+                      <p className='break-all font-mono text-xs text-muted-foreground'>
+                        {selectedPolicy.snapshot_hash}
+                      </p>
+                    </div>
+                  )}
+                  <div className='space-y-2'>
+                    <Label htmlFor='detail-policy-json'>
+                      Every setting in this version, as text
+                    </Label>
+                    <textarea
+                      id='detail-policy-json'
+                      value={
+                        detailLoading ? 'Loading the settings…' : detailSnapshot
+                      }
+                      onChange={(event) =>
+                        setDetailSnapshot(event.target.value)
+                      }
+                      className='min-h-80 w-full rounded-lg border border-input bg-white p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-cornflower/50 disabled:bg-slate-50'
+                      spellCheck={false}
+                      disabled={
+                        detailLoading ||
+                        selectedPolicy.status !== 'draft' ||
+                        !canDraft
+                      }
+                    />
+                    <p className='text-xs text-muted-foreground'>
+                      {selectedPolicy.status === 'draft' && canDraft
+                        ? 'This draft can be changed or deleted until it is tested.'
+                        : 'This version is part of the record and can no longer be changed.'}
+                    </p>
+                  </div>
+                </div>
+              </details>
 
               <DialogFooter className='gap-2 border-t pt-4 sm:space-x-0'>
                 {selectedPolicy.status === 'draft' && canDraft && (
@@ -1247,7 +2204,7 @@ export default function PolicyStudioPage() {
                     disabled={busy !== null || detailLoading || !detailSnapshot}
                     onClick={useAsDraftBaseline}
                   >
-                    Use as draft baseline
+                    Start a new draft from this
                   </Button>
                 )}
                 {selectedPolicy.status === 'draft' && canDraft && (
@@ -1262,7 +2219,7 @@ export default function PolicyStudioPage() {
                     }
                     onClick={() => void saveDraftChanges()}
                   >
-                    Save draft changes
+                    Save the draft
                   </Button>
                 )}
               </DialogFooter>
@@ -1281,9 +2238,9 @@ export default function PolicyStudioPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this draft?</AlertDialogTitle>
             <AlertDialogDescription>
-              Draft {deleteTarget?.version_id} will be permanently removed.
-              Simulated and historical policies cannot be deleted; hide them
-              from the dashboard instead.
+              Draft {deleteTarget?.version_id} will be removed for good. Only
+              drafts can be deleted — a version that has been tested or used is
+              kept for the record, so hide it from the list instead.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
