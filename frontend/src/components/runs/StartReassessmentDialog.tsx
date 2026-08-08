@@ -16,13 +16,16 @@ import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
 import {
   EMPTY_START_VALUES,
-  REASON_CODE_OPTIONS,
+  REASON_REQUEST_GROUPS,
   isStartRunValid,
 } from '@/lib/runs'
 import type { StartRunValues } from '@/lib/runs'
@@ -34,7 +37,6 @@ export type StartReassessmentDialogProps = {
   onOpenChange: (open: boolean) => void
   /** Only Admin and People Ops may reassess a whole cohort. */
   canChooseCohort: boolean
-  employeeSuggestions: string[]
   submitting: boolean
   message: string | null
   /** When these exact details were already sent, the time they were sent. */
@@ -46,7 +48,6 @@ export function StartReassessmentDialog({
   open,
   onOpenChange,
   canChooseCohort,
-  employeeSuggestions,
   submitting,
   message,
   alreadySentAt,
@@ -54,7 +55,6 @@ export function StartReassessmentDialog({
 }: StartReassessmentDialogProps) {
   const [values, setValues] = useState<StartRunValues>(EMPTY_START_VALUES)
   const fieldId = useId()
-  const listId = `${fieldId}-employees`
 
   // Reopening the dialog always starts from a clean form so a stale employee
   // id from an earlier request cannot be submitted by accident.
@@ -167,10 +167,9 @@ export function StartReassessmentDialog({
               <Input
                 id={`${fieldId}-employee`}
                 value={values.employeeId}
-                list={employeeSuggestions.length > 0 ? listId : undefined}
                 autoComplete='off'
                 disabled={submitting}
-                placeholder='For example EMP7021'
+                placeholder='EMP7032'
                 onChange={(event) =>
                   setValues((current) => ({
                     ...current,
@@ -179,20 +178,13 @@ export function StartReassessmentDialog({
                 }
                 aria-describedby={`${fieldId}-employee-hint`}
               />
-              {employeeSuggestions.length > 0 && (
-                <datalist id={listId}>
-                  {employeeSuggestions.map((suggestion) => (
-                    <option key={suggestion} value={suggestion} />
-                  ))}
-                </datalist>
-              )}
               <p
                 id={`${fieldId}-employee-hint`}
                 className='text-xs text-muted-foreground'
               >
-                {employeeSuggestions.length > 0
-                  ? 'Start typing to pick from the people who currently have a case, or enter any employee ID you are allowed to review.'
-                  : 'Enter the employee ID exactly as it appears in the HR records.'}
+                Enter the ID exactly as it appears in the HR records, in the
+                form EMP7032. Anyone can be reassessed, whether or not they
+                already have a case open.
               </p>
             </div>
           ) : (
@@ -223,7 +215,12 @@ export function StartReassessmentDialog({
           )}
 
           <div className='space-y-2'>
-            <Label htmlFor={`${fieldId}-reason`}>Reason (optional)</Label>
+            <Label htmlFor={`${fieldId}-reason`}>
+              Why are you asking?{' '}
+              <span className='font-normal text-muted-foreground'>
+                (optional)
+              </span>
+            </Label>
             <Select
               value={values.reasonCode ?? NO_REASON}
               disabled={submitting}
@@ -237,18 +234,29 @@ export function StartReassessmentDialog({
               <SelectTrigger id={`${fieldId}-reason`}>
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_REASON}>No specific reason</SelectItem>
-                {REASON_CODE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
+              <SelectContent className='max-h-80'>
+                <SelectItem value={NO_REASON}>
+                  No particular reason
+                </SelectItem>
+                {REASON_REQUEST_GROUPS.map((group) => (
+                  <SelectGroup key={group.title}>
+                    <SelectSeparator />
+                    <SelectLabel className='pl-8 text-xs uppercase tracking-wide text-muted-foreground'>
+                      {group.title}
+                    </SelectLabel>
+                    {group.options.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 ))}
               </SelectContent>
             </Select>
             <p className='text-xs text-muted-foreground'>
-              Recorded with the reassessment so the audit trail shows why it was
-              asked for.
+              This is a note for the audit trail, not a filter. Every governed
+              check runs either way — picking a reason does not narrow what gets
+              looked at, and leaving it blank does not skip anything.
             </p>
           </div>
 

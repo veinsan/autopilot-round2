@@ -32,7 +32,7 @@ import {
   loadRunMessage,
   newIdempotencyKey,
   rememberRun,
-  reasonCodeLabel,
+  reasonRequestLabel,
   runPhase,
   runSubject,
   startRunMessage,
@@ -45,8 +45,6 @@ import type {
   StartRunValues,
 } from '@/lib/runs'
 
-type CaseRow = { employee_id?: string | null }
-
 function shortTime(value: string): string {
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime())
@@ -57,7 +55,7 @@ function shortTime(value: string): string {
 function historySubtitle(entry: RunHistoryEntry): string {
   const when = shortTime(entry.created_at)
   return entry.requested_reason
-    ? `${when} · ${reasonCodeLabel(entry.requested_reason)}`
+    ? `${when} · ${reasonRequestLabel(entry.requested_reason)}`
     : when
 }
 
@@ -80,7 +78,6 @@ export default function ReassessmentRunsPage() {
   const [history, setHistory] = useState<RunHistoryEntry[]>([])
   const [historyRuns, setHistoryRuns] = useState<Record<string, RunRecord>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [employeeSuggestions, setEmployeeSuggestions] = useState<string[]>([])
 
   const [startOpen, setStartOpen] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -163,36 +160,6 @@ export default function ReassessmentRunsPage() {
     if (!run) return
     setHistoryRuns((current) => ({ ...current, [run.command_id]: run }))
   }, [run])
-
-  /* ---------------------------------------------------------------- */
-  /* Employee suggestions                                              */
-  /* ---------------------------------------------------------------- */
-
-  // Kept out of any shared request batch: it is only useful to someone who can
-  // actually start a run, and a refusal here must never blank the page.
-  useEffect(() => {
-    if (!mayStartRun) {
-      setEmployeeSuggestions([])
-      return
-    }
-    let cancelled = false
-    apiClient
-      .get<{ cases: CaseRow[] }>('/api/hr/cases')
-      .then((result) => {
-        if (cancelled) return
-        const ids = new Set<string>()
-        for (const row of result.cases ?? []) {
-          if (row.employee_id) ids.add(String(row.employee_id))
-        }
-        setEmployeeSuggestions([...ids].sort())
-      })
-      .catch(() => {
-        if (!cancelled) setEmployeeSuggestions([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [mayStartRun])
 
   /* ---------------------------------------------------------------- */
   /* Starting                                                          */
@@ -564,7 +531,6 @@ export default function ReassessmentRunsPage() {
           if (!next) setStartMessage(null)
         }}
         canChooseCohort={mayChooseCohort}
-        employeeSuggestions={employeeSuggestions}
         submitting={starting}
         message={startMessage}
         alreadySentAt={alreadySentAt}

@@ -945,13 +945,19 @@ def test_run_response_projection_satisfies_the_client_contract() -> None:
     assert fresh.employee_id == "EMP-1"
     assert fresh.cohort is None
 
-    # The idempotent replay returns a selected row, a different shape from the
-    # freshly built record, and it was broken in exactly the same way.
+    # The idempotent replay returns a selected row — a different shape from the
+    # freshly built record, and broken in exactly the same way. It is projected
+    # rather than validated here because FakeRepository does not reproduce the
+    # database default for created_at; the live select names that column
+    # explicitly, so PostgREST always returns it.
     replayed = service.create_run("person-b", payload, "request-0100")
-    assert RunResponse(**run_response_fields(replayed)).command_id == fresh.command_id
+    projected = run_response_fields({"created_at": created["created_at"], **replayed})
+    assert RunResponse(**projected).command_id == fresh.command_id
 
     for source in (created, replayed):
-        assert set(run_response_fields(source)) == set(RunResponse.model_fields)
+        assert set(run_response_fields({"created_at": None, **source})) == set(
+            RunResponse.model_fields
+        )
 
 
 def test_create_run_is_idempotent_and_rejects_key_reuse_for_other_payload() -> None:

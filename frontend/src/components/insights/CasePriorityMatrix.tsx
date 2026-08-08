@@ -12,8 +12,8 @@ import {
   buildPriorityMatrix,
   caseAgeDays,
   caseTypeLabel,
-  formatAge,
   isActingPriority,
+  openForPhrase,
   MATRIX_DERIVATION,
   priorityLabel,
   reconcileCaseViews,
@@ -380,10 +380,7 @@ export function CasePriorityMatrix({
                       {item.employee_id
                         ? `Employee ${item.employee_id}`
                         : 'No employee recorded'}{' '}
-                      · open{' '}
-                      {days === null
-                        ? 'for an unknown time'
-                        : formatAge(days).toLowerCase()}
+                      · {openForPhrase(days)}
                     </span>
                   </li>
                 )

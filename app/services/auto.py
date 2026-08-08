@@ -25,14 +25,23 @@ class AutoWorkflowClient:
 
     @property
     def configured(self) -> bool:
-        return bool(self.base_url and self.api_key and self.org_id and self.workflow_id)
+        return bool(self.base_url and self.api_key and self.workflow_id)
 
     def _headers(self) -> dict[str, str]:
-        return {
+        """Auth headers for Auto.
+
+        ``x-active-org`` is only sent when configured. Auto rejects a request
+        carrying an organization the key is not scoped to with 403, while the
+        same key without the header authenticates normally — so an unset value
+        is workable, but a wrong one silently fails every run.
+        """
+        headers = {
             "Authorization": f"Bearer {self.api_key}",
             "x-source": "external",
-            "x-active-org": self.org_id,
         }
+        if self.org_id:
+            headers["x-active-org"] = self.org_id
+        return headers
 
     @staticmethod
     def _status(value: Any) -> str:
@@ -152,11 +161,15 @@ class AutoWorkflowClient:
         )
         if not claimed:
             return
-        data = {"workflowId": self.workflow_id, "inputs": json.dumps(inputs), "envs": "{}"}
+        # Auto's execute endpoint takes a JSON body, not the multipart form its
+        # published docs describe, and it rejects a serialized string for
+        # `inputs` with "expected record, received string". Sending form data
+        # here failed every run with a transport error.
+        payload = {"workflowId": self.workflow_id, "inputs": inputs, "envs": {}}
         saw_terminal = False
         try:
             with httpx.Client(timeout=httpx.Timeout(connect=15, read=120, write=15, pool=15)) as client:
-                with client.stream("POST", f"{self.base_url}/api/v1/workflow-runs/execute/stream", headers=self._headers(), data=data) as response:
+                with client.stream("POST", f"{self.base_url}/api/v1/workflow-runs/execute/stream", headers=self._headers(), json=payload) as response:
                     response.raise_for_status()
                     for current_event, raw_data in self._parse_sse(response.iter_lines()):
                         try:

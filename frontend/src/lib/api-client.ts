@@ -70,6 +70,35 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The request never reached the server: DNS, connection refused, a blocked
+ * cross-origin request, or the machine being offline. Distinct from `ApiError`,
+ * which means the server answered and refused.
+ */
+export class NetworkError extends Error {
+  readonly cause: unknown
+
+  constructor(cause: unknown) {
+    super('The request could not be sent to the server.')
+    this.name = 'NetworkError'
+    this.cause = cause
+  }
+}
+
+/**
+ * The server answered successfully but the body was not the JSON we expected.
+ * Kept separate so it is never reported to a user as a connection problem.
+ */
+export class MalformedResponseError extends Error {
+  readonly cause: unknown
+
+  constructor(cause: unknown) {
+    super('The server answered with content this screen could not read.')
+    this.name = 'MalformedResponseError'
+    this.cause = cause
+  }
+}
+
 async function toApiError(response: Response): Promise<ApiError> {
   const errorData = await response.json().catch(() => ({
     detail: response.statusText,
@@ -91,7 +120,9 @@ async function apiClientFetch<T = unknown>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const session = await getSession()
+  // `getSession` already swallows its own failures and returns null, but a
+  // throw here would otherwise be indistinguishable from a transport failure.
+  const session = await getSession().catch(() => null)
 
   const headers = new Headers(options.headers || {})
 
@@ -102,7 +133,14 @@ async function apiClientFetch<T = unknown>(
   // Construct the full URL: http://localhost:8001/app1/api/test
   const fullUrl = `${API_URL}${BASE_PATH}${endpoint}`
 
-  const response = await fetch(fullUrl, { ...options, headers })
+  let response: Response
+  try {
+    response = await fetch(fullUrl, { ...options, headers })
+  } catch (cause) {
+    // Only a genuine transport failure lands here. Everything else below is a
+    // real answer from the server and must not be reported as one.
+    throw new NetworkError(cause)
+  }
 
   // If the backend returns a 401, log it but don't force redirect in dev mode
   if (response.status === 401) {
@@ -118,7 +156,11 @@ async function apiClientFetch<T = unknown>(
     return null as T
   }
 
-  return response.json() as Promise<T>
+  try {
+    return (await response.json()) as T
+  } catch (cause) {
+    throw new MalformedResponseError(cause)
+  }
 }
 
 /**
@@ -134,7 +176,7 @@ export async function apiClientStream(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  const session = await getSession()
+  const session = await getSession().catch(() => null)
 
   const headers = new Headers(options.headers || {})
   if (session?.accessToken) {
@@ -142,12 +184,17 @@ export async function apiClientStream(
   }
   headers.set('Accept', 'text/event-stream')
 
-  const response = await fetch(`${API_URL}${BASE_PATH}${endpoint}`, {
-    ...options,
-    method: 'GET',
-    cache: 'no-store',
-    headers,
-  })
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}${BASE_PATH}${endpoint}`, {
+      ...options,
+      method: 'GET',
+      cache: 'no-store',
+      headers,
+    })
+  } catch (cause) {
+    throw new NetworkError(cause)
+  }
 
   if (!response.ok) {
     throw await toApiError(response)

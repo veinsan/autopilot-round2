@@ -303,9 +303,11 @@ export function caseAgeDays(
   return Math.max(0, Math.floor((reference - created) / 86_400_000))
 }
 
-export function formatAge(days: number): string {
-  if (days < 1) return 'Today'
-  return days === 1 ? '1 day' : `${days} days`
+/** How long one case has been waiting, as a phrase that reads in a sentence. */
+export function openForPhrase(days: number | null): string {
+  if (days === null) return 'open for an unrecorded length of time'
+  if (days < 1) return 'raised today'
+  return days === 1 ? 'open for 1 day' : `open for ${days} days`
 }
 
 function bandIndexFor(days: number): number {

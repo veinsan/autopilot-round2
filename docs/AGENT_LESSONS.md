@@ -488,7 +488,6 @@ credentials or confidential payloads.
   identifiers-and-counts only. Rows written by separate steps of one run cannot
   be proven to belong to that run when each step names the run differently.
 
-<<<<<<< Updated upstream
 ## Auto Studio / Policy Studio live lessons — 2026-08-08 (OP-03 + day-H)
 
 ### Commit after each verified Auto fix before opening a fresh chat
@@ -580,7 +579,6 @@ credentials or confidential payloads.
   codes, but runtime validation must never hard-code `== 18`. Require a
   non-empty active-policy registry and parity with the engineering registry so
   future approved additions do not break routing.
-=======
 ## Command Center RPC lessons — 2026-08-08 (`record_finding_event`)
 
 ### `on conflict do nothing` plus an unconditional `return true` reports a lie
@@ -675,5 +673,114 @@ credentials or confidential payloads.
   code found only the ones that were visible as text. For any RPC that carries a
   contract about return values or idempotency, stand up the constraints and prove
   the behaviour before applying it to Supabase.
->>>>>>> Stashed changes
 
+
+## Command Center wiring lessons — 2026-08-08 (first live `POST /hr/runs`)
+
+### A browser CORS error is often a 500 wearing a disguise
+
+- Mistake: the browser reported "No 'Access-Control-Allow-Origin' header is
+  present on the requested resource" for `POST /api/hr/runs`, and CORS was
+  investigated first. CORS was never misconfigured. The endpoint raised
+  `ResponseValidationError`, and Starlette's outermost error handler produced
+  that 500 *outside* `CORSMiddleware`, so the response carried no CORS headers.
+- Prevention: before touching CORS config, send the same request unauthenticated
+  with an `Origin` header. If that response carries
+  `access-control-allow-origin`, CORS works and the browser message is a symptom
+  of a server error on the authenticated path — read the backend log for the
+  traceback instead. `add_middleware` puts the most recently added middleware
+  outermost, so anything that raises past `CORSMiddleware` loses its headers.
+
+### An endpoint with no caller has never been tested, whatever the suite says
+
+- Mistake: `POST /hr/runs` returned the command row verbatim while
+  `RunResponse` is a `StrictModel` that forbids extras, so it had never once
+  succeeded. The suite was green because the tests covered
+  `HROpsService.create_run`, not the endpoint's response contract. The defect
+  surfaced only when a UI first called it.
+- Prevention: a passing service-layer test says nothing about a `response_model`.
+  When wiring a UI to an endpoint that has never had one, exercise the endpoint
+  itself before building on it. Where no HTTP test harness exists, extract the
+  response projection into a plain function and assert
+  `Model(**projection(row))` for every shape the service can return — here the
+  freshly built record and the idempotent-replay row differed, and both were
+  broken.
+
+### Write-then-serialize leaves orphans that look like nothing happened
+
+- Mistake: the command row was inserted and only then did response validation
+  fail. Each attempt left a `queued` row in `command_runs` with a null
+  `auto_run_id`, and the background task never ran because it is attached to a
+  response that was never produced. Five orphans accumulated before anyone
+  noticed, each looking like a run that had simply not started yet.
+- Prevention: when a handler writes before it returns, a serialization failure is
+  a partial commit. Check the table after any 500 on a write endpoint rather than
+  assuming a failed request changed nothing.
+
+### Published API docs can be wrong about the request encoding
+
+- Mistake: `AutoWorkflowClient.execute_stream` posted `multipart`/form data with
+  `inputs` as a `json.dumps` string, matching Auto's published docs. Every run
+  failed with a transport error. The endpoint actually takes a JSON body and
+  rejects a serialized string with `expected record, received string`; sending
+  `json=` returned 200 and a proper SSE stream.
+- Prevention: when an integration fails wholesale, probe the endpoint directly
+  with a deliberately invalid resource id — a bogus workflow UUID here — so a
+  valid request is distinguishable from an accepted one without triggering real
+  work. `Workflow not found` arriving as a normal SSE event is proof the envelope
+  is right; a 400 about a field type is proof it is not.
+
+### Vary one header at a time, or a 403 tells you nothing
+
+- Mistake: the execute endpoint returned a bare `403 Forbidden` and it was read
+  as a bad API key. Four controls settled it: key + `x-active-org` gave 403; the
+  same key without that header authenticated and failed validation instead; a
+  deliberately invalid key gave 401; and dropping the org header let a real
+  request through. The key was fine — the configured organization was rejected.
+- Prevention: for any auth-shaped failure, run the matrix rather than the guess —
+  valid credential, deliberately invalid credential, and each optional header
+  present and absent. A code that does not change between valid and invalid
+  credentials is not evidence about credentials at all. This is the same trap
+  already recorded for Auto's listing endpoint, met again on a different route.
+
+### Verify an endpoint exists before briefing work that depends on it
+
+- Mistake: a subagent was told to build a run-history list against
+  `GET /api/hr/runs`. That endpoint does not exist; `/api/hr/runs` is POST only.
+  The correction arrived after the work had started.
+- Prevention: enumerate the live contract from the running service —
+  `GET /api/openapi.json` here — before writing a brief that names endpoints.
+  Memory of a route is not evidence of a route.
+
+### A test double does not reproduce database defaults
+
+- Mistake: a new test asserted the idempotent-replay branch through the response
+  model and failed on a missing `created_at`. In production the column has a
+  database default and the select names it explicitly, so it is always present;
+  `FakeRepository` simply does not model defaults.
+- Prevention: when a test fails on a field the database fills in, fix the test to
+  reflect the real select rather than making production code tolerate an absence
+  that cannot occur — and say in the test why the double diverges.
+
+### Concurrent agents cannot share one build directory
+
+- Mistake: two subagents editing the same frontend both ran `next build`, and one
+  died on `ENOENT: pages-manifest.json` from a shared `.next`.
+- Prevention: serialize builds across concurrent agents, or give each its own
+  working copy. Related: on this Windows/OneDrive checkout, `next build` also
+  fails intermittently with `ENOENT`/`ENOTEMPTY` on `.next` because OneDrive
+  holds file handles; `rm -rf .next` and rebuild rather than treating it as a
+  code error.
+
+### Check whether the data supports the visualization before designing it
+
+- Prevention: a request for a risk-versus-urgency matrix over the insights
+  endpoints could only be half satisfied. `case_metrics` returns aggregate counts
+  with no `priority` and no `created_at`, and operational-twin bottlenecks carry
+  reach (`affected_workers`, `affected_percent`) but no time dimension at all.
+  The honest build took `priority` and `created_at` from `/api/hr/cases` — the
+  same population itemised, with the equivalence verified in the source — and
+  left bottlenecks off the grid with an on-screen sentence explaining why. Naming
+  the axes is the easy part; establishing that the data can carry them is the
+  work, and inventing a composite score to fill the gap would have produced a
+  confident-looking chart that means nothing.

@@ -7,7 +7,7 @@
  * separate "details for support" affordance on the page.
  */
 
-import { ApiError } from '@/lib/api-client'
+import { ApiError, NetworkError } from '@/lib/api-client'
 
 export type RunScope = 'employee' | 'cohort'
 
@@ -69,13 +69,102 @@ const REASON_CODE_LABELS: Record<string, string> = {
   COHORT_DEPENDENCY_BOTTLENECK: 'A shared dependency is blocking a cohort',
 }
 
-export const REASON_CODE_OPTIONS = Object.entries(REASON_CODE_LABELS)
-  .map(([value, label]) => ({ value, label }))
-  .sort((left, right) => left.label.localeCompare(right.label))
-
 export function reasonCodeLabel(code: string | null | undefined): string {
   if (!code) return 'No reason recorded'
   return REASON_CODE_LABELS[code] ?? 'An operational signal was recorded'
+}
+
+/**
+ * The same governed registry, worded as an answer to "why am I asking for this
+ * reassessment?" rather than "what did the system find?". The stored value is
+ * unchanged — only the wording differs — because `create_run` rejects anything
+ * outside the registry.
+ */
+const REASON_REQUEST_LABELS: Record<string, string> = {
+  COMPLIANCE_DEADLINE_AT_RISK: 'A compliance deadline is approaching',
+  COMPLIANCE_LEGAL_BREACH: 'A compliance deadline has been missed',
+  STALLED_COMPLIANCE_DOC: 'A compliance document has not come back',
+  WORK_AUTH_EXPIRY_AT_RISK: 'Work authorisation is expiring soon',
+  WORK_AUTH_EXPIRED: 'Work authorisation has expired',
+
+  PAYROLL_ERROR_DETECTED: 'Something looks wrong in their pay',
+  PAYROLL_NOT_CONFIRMED: 'First payroll has not been confirmed',
+  PAYROLL_RECORD_MISSING: 'There is no payroll record for them',
+
+  MISSING_DAY_ONE_ACCESS: 'They still cannot get into what they need',
+  PROVISIONING_DELAYED: 'Equipment or accounts are late',
+  DAY_ONE_DEPENDENCY_BLOCKED: 'Another team is blocking their first day',
+  COHORT_DEPENDENCY_BOTTLENECK: 'One dependency is holding up a whole cohort',
+
+  LEARNING_MILESTONE_OVERDUE: 'A learning milestone is overdue',
+  LOW_ENGAGEMENT_SCORE: 'Their engagement score has dropped',
+  SENSITIVE_DISCLOSURE_DETECTED: 'A confidential matter needs reviewing',
+
+  MANAGER_ACKNOWLEDGMENT_OVERDUE: 'Their manager has not acknowledged a nudge',
+  MANAGER_ACTION_OVERDUE: 'Their manager has not completed an action',
+  TASK_ALREADY_ESCALATED: 'This was escalated already and needs another look',
+}
+
+/** Grouped so eighteen options stay scannable in the picker. */
+export const REASON_REQUEST_GROUPS: Array<{
+  title: string
+  options: Array<{ value: string; label: string }>
+}> = [
+  {
+    title: 'Compliance and work authorisation',
+    options: [
+      'COMPLIANCE_DEADLINE_AT_RISK',
+      'COMPLIANCE_LEGAL_BREACH',
+      'STALLED_COMPLIANCE_DOC',
+      'WORK_AUTH_EXPIRY_AT_RISK',
+      'WORK_AUTH_EXPIRED',
+    ],
+  },
+  {
+    title: 'Pay',
+    options: [
+      'PAYROLL_ERROR_DETECTED',
+      'PAYROLL_NOT_CONFIRMED',
+      'PAYROLL_RECORD_MISSING',
+    ],
+  },
+  {
+    title: 'Getting set up',
+    options: [
+      'MISSING_DAY_ONE_ACCESS',
+      'PROVISIONING_DELAYED',
+      'DAY_ONE_DEPENDENCY_BLOCKED',
+      'COHORT_DEPENDENCY_BOTTLENECK',
+    ],
+  },
+  {
+    title: 'Progress and engagement',
+    options: [
+      'LEARNING_MILESTONE_OVERDUE',
+      'LOW_ENGAGEMENT_SCORE',
+      'SENSITIVE_DISCLOSURE_DETECTED',
+    ],
+  },
+  {
+    title: 'Manager follow-up',
+    options: [
+      'MANAGER_ACKNOWLEDGMENT_OVERDUE',
+      'MANAGER_ACTION_OVERDUE',
+      'TASK_ALREADY_ESCALATED',
+    ],
+  },
+].map((group) => ({
+  title: group.title,
+  options: group.options.map((value) => ({
+    value,
+    label: REASON_REQUEST_LABELS[value],
+  })),
+}))
+
+/** How a requested reason reads once the reassessment exists. */
+export function reasonRequestLabel(code: string | null | undefined): string {
+  if (!code) return 'No reason given'
+  return REASON_REQUEST_LABELS[code] ?? 'Reason recorded'
 }
 
 /* -------------------------------------------------------------------------- */
@@ -350,31 +439,51 @@ function eventTroubleSentence(errorTypes: string[]): string | null {
 /* Failure wording                                                             */
 /* -------------------------------------------------------------------------- */
 
-type Classified = { status: number | null; detail: string; offline: boolean }
+/**
+ * Why a request did not succeed.
+ *
+ * `fault` exists so an unexpected client-side failure is never reported as a
+ * connection problem. Telling someone to check their network when the network
+ * is fine sends them somewhere they cannot fix anything.
+ */
+type FailureKind = 'refused' | 'network' | 'auth' | 'fault'
 
-function classify(error: unknown): Classified {
+type Classified = { status: number | null; detail: string; kind: FailureKind }
+
+function classify(error: unknown, context: string): Classified {
   if (error instanceof ApiError) {
     return {
       status: error.status,
       detail: String(error.message ?? '').toLowerCase(),
-      offline: false,
+      kind: error.status === 401 ? 'auth' : 'refused',
     }
   }
-  return { status: null, detail: '', offline: true }
+  if (error instanceof NetworkError) {
+    return { status: null, detail: '', kind: 'network' }
+  }
+  // Anything else is a defect rather than a condition. Keep the real error on
+  // the console so the next occurrence can actually be diagnosed instead of
+  // disappearing behind a friendly sentence.
+  console.error(`[Reassessments] ${context} failed unexpectedly`, error)
+  return { status: null, detail: '', kind: 'fault' }
 }
 
 const SESSION_EXPIRED =
-  'Your sign-in has expired, so nothing was sent. Sign in again and repeat the action.'
+  'You are not signed in any more, so nothing was sent. Sign in again, then repeat this.'
 
 const SERVICE_UNREACHABLE =
-  'The Command Center could not be reached, so nothing was sent. Check your connection and try again.'
+  'The Command Center could not be reached, so nothing was sent. Check your connection, then try again.'
+
+const UNEXPECTED_FAULT =
+  'Something went wrong on this screen and nothing was sent. Your connection and sign-in are fine. Reload the page and try again; if it keeps happening, share the details for support with your platform team.'
 
 /** What to tell the operator when starting a reassessment did not work. */
 export function startRunMessage(error: unknown): string {
-  const { status, detail, offline } = classify(error)
+  const { status, detail, kind } = classify(error, 'Starting a reassessment')
 
-  if (offline) return SERVICE_UNREACHABLE
-  if (status === 401) return SESSION_EXPIRED
+  if (kind === 'network') return SERVICE_UNREACHABLE
+  if (kind === 'fault') return UNEXPECTED_FAULT
+  if (kind === 'auth') return SESSION_EXPIRED
 
   if (status === 503) {
     if (detail.includes('hr data')) {
@@ -420,10 +529,15 @@ export function startRunMessage(error: unknown): string {
 
 /** What to tell the operator when stopping a reassessment did not work. */
 export function cancelRunMessage(error: unknown): string {
-  const { status, detail, offline } = classify(error)
+  const { status, detail, kind } = classify(error, 'Stopping a reassessment')
 
-  if (offline) return SERVICE_UNREACHABLE
-  if (status === 401) return SESSION_EXPIRED
+  if (kind === 'network') {
+    return 'The Command Center could not be reached, so the stop request was not sent and the reassessment is still running. Check your connection, then try again.'
+  }
+  if (kind === 'fault') {
+    return 'Something went wrong on this screen and the stop request was not sent, so the reassessment is still running. Your connection and sign-in are fine. Reload the page and try again.'
+  }
+  if (kind === 'auth') return SESSION_EXPIRED
 
   if (status === 409) {
     if (detail.includes('already requested')) {
@@ -456,10 +570,15 @@ export function cancelRunMessage(error: unknown): string {
 
 /** What to tell the operator when a run could not be opened or refreshed. */
 export function loadRunMessage(error: unknown): string {
-  const { status, offline } = classify(error)
+  const { status, kind } = classify(error, 'Opening a reassessment')
 
-  if (offline) return SERVICE_UNREACHABLE
-  if (status === 401) return SESSION_EXPIRED
+  if (kind === 'network') {
+    return 'The Command Center could not be reached, so this reassessment cannot be shown right now. It keeps running on the server. Check your connection, then try again.'
+  }
+  if (kind === 'fault') {
+    return 'Something went wrong on this screen, so this reassessment cannot be shown right now. It keeps running on the server. Reload the page to try again.'
+  }
+  if (kind === 'auth') return SESSION_EXPIRED
   if (status === 403) {
     return 'You do not have access to that reassessment, so it cannot be shown here.'
   }

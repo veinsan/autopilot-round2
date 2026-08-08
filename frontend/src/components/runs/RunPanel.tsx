@@ -13,7 +13,7 @@ import {
   formatTimestamp,
   isTerminalPhase,
   phaseSentence,
-  reasonCodeLabel,
+  reasonRequestLabel,
   runPhase,
   runSubject,
   summariseRun,
@@ -149,7 +149,7 @@ export function RunPanel({
             <p className='mt-1 text-sm text-muted-foreground'>
               Requested {formatTimestamp(run.created_at)}
               {run.requested_reason
-                ? ` · ${reasonCodeLabel(run.requested_reason)}`
+                ? ` · ${reasonRequestLabel(run.requested_reason)}`
                 : ''}
             </p>
           </div>
