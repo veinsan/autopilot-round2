@@ -20,6 +20,8 @@ const navItems = [
     items: [
       { href: '/', label: 'Dashboard', icon: Icons.dashboard },
       { href: '/workbench', label: 'Workbench', icon: Icons.workbench },
+      { href: '/runs', label: 'Reassessments', icon: Icons.repeat },
+      { href: '/insights', label: 'Insights', icon: Icons.barChart },
       { href: '/policies', label: 'Policy Studio', icon: Icons.layers },
       { href: '/data-manager', label: 'Data Manager', icon: Icons.activity },
     ],

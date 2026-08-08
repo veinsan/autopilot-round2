@@ -53,6 +53,26 @@ def _employee_filter(hr: HROpsService, employee_ids: set[str]) -> str:
     return hr._in_filter(employee_ids)
 
 
+def run_response_fields(run: dict[str, Any]) -> dict[str, Any]:
+    """Project a command run onto the client contract.
+
+    Both branches of ``create_run`` carry server-only bookkeeping — the actor
+    subject, the idempotency key hash, and the request fingerprint — while
+    ``RunResponse`` forbids extra fields. Returning the row verbatim therefore
+    fails response validation *after* the row is written and the workflow is
+    dispatched, which surfaces to the browser as a bare 500 with no CORS
+    headers.
+    """
+    return {
+        "command_id": run["command_id"],
+        "status": run["status"],
+        "created_at": run["created_at"],
+        "scope": run["scope"],
+        "employee_id": run.get("employee_id"),
+        "cohort": run.get("cohort"),
+    }
+
+
 @router.get("/dashboard")
 def dashboard(
     user: dict = Depends(get_current_user), hr: HROpsService = Depends(service)
@@ -645,7 +665,7 @@ def create_run(
     }
     if run.get("status") == "queued":
         background_tasks.add_task(auto.execute_stream, run["command_id"], inputs)
-    return run
+    return run_response_fields(run)
 
 
 @router.get("/runs/{command_id}")

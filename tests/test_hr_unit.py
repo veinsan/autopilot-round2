@@ -918,6 +918,42 @@ def test_create_run_persists_server_generated_queued_command() -> None:
     ]
 
 
+def test_run_response_projection_satisfies_the_client_contract() -> None:
+    """Both create_run branches must survive RunResponse validation.
+
+    The router previously returned the row verbatim. `RunResponse` forbids extra
+    fields, so the response failed validation after the command row was already
+    written and the workflow already dispatched — a 500 with no CORS headers,
+    and an orphaned `queued` row with no Auto run behind it.
+    """
+    from app.routers.hr import run_response_fields
+    from app.schemas.hr import RunResponse
+
+    repo = FakeRepository()
+    service = HROpsService(repo)  # type: ignore[arg-type]
+    payload = {
+        "scope": "employee",
+        "employee_id": "EMP-1",
+        "reason_code": "MISSING_DAY_ONE_ACCESS",
+    }
+
+    created = service.create_run("person-b", payload, "request-0100")
+    fresh = RunResponse(**run_response_fields(created))
+    assert fresh.command_id == created["command_id"]
+    assert fresh.status == "queued"
+    assert fresh.scope == "employee"
+    assert fresh.employee_id == "EMP-1"
+    assert fresh.cohort is None
+
+    # The idempotent replay returns a selected row, a different shape from the
+    # freshly built record, and it was broken in exactly the same way.
+    replayed = service.create_run("person-b", payload, "request-0100")
+    assert RunResponse(**run_response_fields(replayed)).command_id == fresh.command_id
+
+    for source in (created, replayed):
+        assert set(run_response_fields(source)) == set(RunResponse.model_fields)
+
+
 def test_create_run_is_idempotent_and_rejects_key_reuse_for_other_payload() -> None:
     repo = FakeRepository()
     service = HROpsService(repo)  # type: ignore[arg-type]

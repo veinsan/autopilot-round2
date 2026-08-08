@@ -51,6 +51,37 @@ export function formatApiErrorDetail(detail: unknown): string {
 }
 
 /**
+ * Error thrown for any non-2xx API response.
+ *
+ * `message` stays exactly what it was before this class existed (the readable
+ * detail), so every `error instanceof Error` / `error.message` call site keeps
+ * working. `status` is added so a screen can translate a specific backend
+ * refusal into its own wording instead of showing the raw detail.
+ */
+export class ApiError extends Error {
+  readonly status: number
+  readonly detail: unknown
+
+  constructor(status: number, message: string, detail: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
+  }
+}
+
+async function toApiError(response: Response): Promise<ApiError> {
+  const errorData = await response.json().catch(() => ({
+    detail: response.statusText,
+  }))
+  return new ApiError(
+    response.status,
+    formatApiErrorDetail(errorData.detail),
+    errorData.detail
+  )
+}
+
+/**
  * A robust API client that handles authentication and base path resolution.
  * @param endpoint The API endpoint to call, e.g., '/api/test' or '/api/admin/dashboard'.
  *                 The endpoint should include the '/api' prefix.
@@ -79,10 +110,7 @@ async function apiClientFetch<T = unknown>(
   }
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({
-      detail: response.statusText,
-    }))
-    throw new Error(formatApiErrorDetail(errorData.detail))
+    throw await toApiError(response)
   }
 
   // Handle responses with no content
@@ -94,9 +122,49 @@ async function apiClientFetch<T = unknown>(
 }
 
 /**
+ * Open a streaming response (Server-Sent Events) with the same authentication
+ * and base-path handling as the rest of the client.
+ *
+ * The browser `EventSource` API cannot send an `Authorization` header or a
+ * `Last-Event-ID` header on the initial request, so progress streams are read
+ * from the response body instead. The caller owns the reader and should pass an
+ * `AbortSignal` to close it.
+ */
+export async function apiClientStream(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const session = await getSession()
+
+  const headers = new Headers(options.headers || {})
+  if (session?.accessToken) {
+    headers.set('Authorization', `Bearer ${session.accessToken}`)
+  }
+  headers.set('Accept', 'text/event-stream')
+
+  const response = await fetch(`${API_URL}${BASE_PATH}${endpoint}`, {
+    ...options,
+    method: 'GET',
+    cache: 'no-store',
+    headers,
+  })
+
+  if (!response.ok) {
+    throw await toApiError(response)
+  }
+
+  return response
+}
+
+/**
  * API client with convenience methods for common HTTP operations.
  */
 export const apiClient = {
+  /**
+   * Open an authenticated Server-Sent Events stream.
+   */
+  stream: apiClientStream,
+
   /**
    * Perform a GET request.
    */
