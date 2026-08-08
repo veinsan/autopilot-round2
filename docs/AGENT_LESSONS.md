@@ -488,6 +488,7 @@ credentials or confidential payloads.
   identifiers-and-counts only. Rows written by separate steps of one run cannot
   be proven to belong to that run when each step names the run differently.
 
+<<<<<<< Updated upstream
 ## Auto Studio / Policy Studio live lessons — 2026-08-08 (OP-03 + day-H)
 
 ### Commit after each verified Auto fix before opening a fresh chat
@@ -579,4 +580,100 @@ credentials or confidential payloads.
   codes, but runtime validation must never hard-code `== 18`. Require a
   non-empty active-policy registry and parity with the engineering registry so
   future approved additions do not break routing.
+=======
+## Command Center RPC lessons — 2026-08-08 (`record_finding_event`)
+
+### `on conflict do nothing` plus an unconditional `return true` reports a lie
+
+- Mistake: the first draft of `record_finding_event` ended with
+  `insert ... on conflict ("event_id") do nothing; return true;`. When the
+  `event_id` already existed the row was dropped and the function still returned
+  `true`. The caller has no way to detect it, so the finding disappears with no
+  error anywhere.
+- Prevention: when a function's contract distinguishes inserted from suppressed,
+  wrap the insert in its own block with
+  `exception when unique_violation then return false` instead of `on conflict`.
+  That also covers *every* unique index on the table, not just the one named in
+  the conflict target — the row here is protected by both `event_id` and a
+  partial unique index on `(execution_id, source_event_id)`, and a single
+  `on conflict` clause can only name one of them.
+
+### A guard written for Command Center runs breaks every scheduled run
+
+- Mistake: the function looked the run up in `command_runs` and raised
+  `Command run not found` when absent. Scheduled and Typeform-parented runs have
+  no `command_runs` row at all — they carry the Auto run ID as `execution_id` —
+  so every finding from the Daily Cohort Sweep would have failed hard.
+- Prevention: before adding a referential guard, enumerate which trigger paths
+  actually produce that parent row. In this project the paths are Command Center,
+  Typeform polling parent, and Daily Cohort Sweep, and only the first creates a
+  `command_runs` row. Guards that exist only to gate a lifecycle should be
+  skipped, not fatal, when there is no lifecycle to gate.
+
+### Two writers stop sharing a state machine but still share a unique index
+
+- Mistake: splitting lifecycle events (Command Center, via
+  `persist_workflow_event`) from finding events (ORCH-01, via
+  `record_finding_event`) removed the race on `command_runs.status` but left both
+  writing `(execution_id, source_event_id)` into one partial unique index. A
+  finding that claimed an id a later lifecycle event needed aborted that terminal
+  transaction, stranding the run in `running` forever.
+- Prevention: namespace identifiers per writer (`'finding:' || ...`) whenever two
+  independent producers write to a shared uniqueness constraint. Separating the
+  mutable state is not the same as separating the key space.
+
+### A strict allowlist on one column is bypassed by the column beside it
+
+- Mistake: `details` was filtered down to two allowlisted string keys, but
+  `employee_id` and `cohort` were inserted verbatim. `sanitize_event_rows`
+  cleans `details`, `reason_codes`, `operator_id`, and `event_type` — not those
+  two — so an arbitrary string placed in `cohort` is stored and then served by
+  the run-events endpoint.
+- Prevention: check what the read path sanitizes before deciding a write path is
+  safe, and validate identity columns by reference (the subject must exist in
+  `Workers`) rather than by format. A privacy control that covers one field of a
+  row is not a control on the row.
+
+### Canonicalise an identifier before it is used to look anything up
+
+- Mistake: `record_finding_event` lowercased `target_command_id` inside the
+  branch that runs when no `command_runs` row was found — that is, *after* the
+  lookup. A mixed-case spelling of a real run therefore missed its own row, fell
+  into the no-run branch, skipped the terminal-status and cancellation guards
+  entirely, and was then lowered and inserted under the canonical id, where the
+  run-events endpoint serves it. Adding canonicalisation made the bug worse
+  rather than better: before it, the smuggled row landed under a distinct
+  uppercase id that no reader could see; after it, the row appeared in the
+  stream of a run that was already completed or cancelled.
+- Prevention: normalise an identifier once, immediately after validating it, and
+  before the first read or write that uses it. When a normalisation step is
+  added to code that already branches on a lookup result, re-check every guard
+  that sits between the lookup and the normalisation — each one is now reachable
+  with a value the lookup never saw.
+
+### Confirm which identifier changed before rewriting tests that depend on it
+
+- Mistake: a one-line report that "the Auto Studio form no longer exposes
+  `command_id` or `execution_id`" was accepted as fact and dispatched as a
+  documentation task. Only half was true — `execution_id` is not an input, but
+  `command_id` still is. Acting on the wrong half would have relabelled the
+  §7 test tables as historical correlation labels and declared O.1 test #3 and
+  O.2 test #2 unrunnable, even though both still work: the tester types the same
+  `command_id` twice and ORCH-01 derives the same `execution_id` from it.
+- Prevention: when a platform is said to have stopped accepting an input, name
+  the exact field and verify it before editing anything that depends on it. A
+  test that pins or replays an identifier is only runnable while that identifier
+  is an input; if it truly becomes generated per run, the test must be
+  re-planned, not merely re-labelled — but a derived id whose source is still
+  typed keeps every replay test valid, so the two cases must not be conflated.
+
+### Review SQL by running it, not by reading it
+
+- Prevention: three of the four defects above were found by loading the function
+  into a scratch PostgreSQL instance with the real constraints and indexes and
+  executing the replay, cancellation, and collision scenarios. Reading the same
+  code found only the ones that were visible as text. For any RPC that carries a
+  contract about return values or idempotency, stand up the constraints and prove
+  the behaviour before applying it to Supabase.
+>>>>>>> Stashed changes
 

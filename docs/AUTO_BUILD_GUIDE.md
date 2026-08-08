@@ -1330,9 +1330,14 @@ object and nothing else:
 There is no execution_id input key: derive execution_id from command_id, and
 when command_id is absent (scheduled or Typeform-parented runs) use the stable
 Auto run ID instead. There is no trigger_source input key either: treat the run
-as "command_center" when command_id is present and "scheduled" otherwise. Take
-as_of from config_snapshot.as_of_date of the active policy, never from the
-input. reason_code may be null; it is a filter hint, never a finding.
+as "command_center" when command_id is present and "scheduled" otherwise.
+ORCH-01 does not read the active policy and does not need Supabase credentials
+in this stage: every Operator resolves config_snapshot itself, which is what
+makes each one's policy_version_id independent evidence. Forward an as_of only
+when a parent workflow supplied one, as the Daily Cohort Sweep does to share a
+single instant across its children; otherwise leave it absent and let the
+Operators resolve it. Never synthesize an as_of date.
+reason_code may be null; it is a filter hint, never a finding.
 Pass the derived execution_id down to every child Operator, because OP-02,
 OP-03, OP-05, OP-06, and OP-07 take employee_id and execution_id as their own
 inputs.
@@ -1364,22 +1369,133 @@ case/notification writer.
 
 **Tests:**
 
-Field yang sama: `scope=employee`. Kolom `execution_id` di tabel bawah adalah
-nilai `command_id` yang dikirim — ORCH-01 menurunkan `execution_id` darinya, dan
-`trigger_source` dideteksi sendiri, jadi keduanya **bukan** field input yang
-diisi manual. `as_of_date` diambil dari `config_snapshot` policy aktif; kalau
-sebuah baris menuntut `as_of` tertentu, pin lewat Policy Studio, bukan lewat
-input run. Jalankan dari Command Center supaya `command_id` benar-benar berasal
-dari `app/services/hr.py`; test form Auto langsung hanya sah untuk baris yang
-memang menguji jalur non-Command-Center.
+Field yang sama: `scope=employee`. Kolom di tabel bawah adalah **`command_id`,
+dan itu memang field input** yang diisi manual — nilai `cmd_...` di kolom itu
+diketik apa adanya ke field `command_id`. `execution_id` **bukan** field input
+dan tidak pernah bisa diketik: ORCH-01 menurunkannya dari `command_id`, dan
+`trigger_source` dideteksi sendiri. Karena penurunannya deterministik,
+`command_id` yang sama selalu menghasilkan `execution_id` yang sama — itulah
+yang membuat baris replay/idempotensi di bawah tetap bisa dijalankan dari test
+form. `as_of_date` diambil dari `config_snapshot` policy aktif; kalau sebuah
+baris menuntut `as_of` tertentu, pin lewat Policy Studio, bukan lewat input run.
+Jalankan dari Command Center supaya `command_id` benar-benar berasal dari
+`app/services/hr.py`; test form Auto langsung hanya sah untuk baris yang memang
+menguji jalur non-Command-Center.
 
-| # | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan |
+**Run tanpa `command_id`.** Untuk run terjadwal atau yang diparenti Typeform,
+tidak ada `command_id` sama sekali dan `execution_id` benar-benar dibangkitkan
+saat run: ORCH-01 membentuknya sebagai `cmd_auto_` + 24 karakter hex pertama
+dari `sha256(auto_run_id)`. Nilai itu tidak bisa diketik di mana pun — **baca
+dari output step 1 (atau dari Activity Timeline) setelah run selesai**, lalu
+pakai nilai itu sebagai `<cmd>` di SQL verifikasi. Ini hanya berlaku untuk run
+tanpa `command_id`; semua baris tabel di bawah memakai `command_id` yang
+diketik.
+
+**Pre-flight — jalankan sebelum baris mana pun.** Setiap angka yang diharapkan
+di bawah mengasumsikan policy baseline yang aktif, bukan turunan draft test.
+Konfirmasi dulu, jangan ditebak:
+
+```sql
+select "version_id", "status", "activated_at",
+       "config_snapshot"->'thresholds'->'compliance_at_risk_days' as compliance_days,
+       "config_snapshot"->>'as_of_date' as as_of
+from "policy_versions" where "status" = 'active';
+```
+
+Kalau `version_id` yang muncul bukan baseline, kembalikan lewat Policy Studio
+(draft → simulate → approve → activate; versi `retired` tidak bisa diaktifkan
+langsung) sebelum melanjutkan. Catat `version_id` ini — semua baris di bawah
+membandingkan terhadapnya.
+
+**Kalau dijalankan dari test form Auto, bukan Command Center.** Selama `G-04`
+belum selesai, jalur Command Center belum tersedia dan baris-baris ini boleh
+dijalankan dari test form. Konsekuensinya harus dicatat, bukan diabaikan: tanpa
+baris `command_runs`, `persist_workflow_event` menolak dengan
+`Command run not found`, jadi **tidak akan ada baris lifecycle di
+`workflow_events` sama sekali** — query verifikasi ketiga di bawah akan kosong,
+dan itu bukan kegagalan O.1. Begitu RPC `record_finding_event` sudah di-apply,
+run test form juga akan gagal menulis finding, karena `cmd_` + 32 hex yang tidak
+punya baris `command_runs` bukan bentuk yang sah.
+
+Untuk membuat run test form berperilaku seperti run Command Center, tanam dulu
+baris `command_runs`-nya. Ganti `<cmd>` dan `<employee>`:
+
+```sql
+insert into "command_runs"
+  ("command_id", "created_by", "status", "scope", "employee_id",
+   "workflow_key", "trigger_source", "reconciliation_status")
+values
+  ('<cmd>', 'auto_test_form', 'running', 'employee', '<employee>',
+   'hr_orchestrator', 'auto', 'pending')
+on conflict ("command_id") do nothing;
+```
+
+Catat di kolom bukti baris mana yang dijalankan dengan cara ini. Bukti fan-out,
+merge, routing, dan idempotensi tetap sah; bukti korelasi command/event tidak,
+dan itu memang milik O.2.
+
+Catat juga garis dasar jumlah baris supaya test idempotensi punya pembanding:
+
+```sql
+select count(*) as evaluations from "policy_evaluations" where "employee_id" = 'EMP7032';
+select count(*) as cases from "workbench_cases" where "employee_id" = 'EMP7032';
+```
+
+| # | Scenario | employee_id | command_id (input; `execution_id` diturunkan darinya) | Expected output | Fixture |
 |---|---|---|---|---|---|
-| 1 | Multi-domain, dua Operator sekaligus | `EMP7032` | `cmd_685e727f698af6056739c1cb0d3493f2` | Hasil OP-05 (`COMPLIANCE_DEADLINE_AT_RISK`) **dan** OP-06 (tergantung status payroll `EMP7032` saat ini) sama-sama selamat di merge; masing-masing route ke case terpisah (compliance vs payroll), tidak tercampur | Tidak ada |
-| 2 | Satu branch gagal, yang lain tetap jalan | `EMP7032` | `cmd_cc2392e2c28db7cb5245cefe620c97be` | Temuan OP-05 tetap ada dan ter-route normal; branch OP-06 yang gagal muncul sebagai satu `system_exception` terpisah, **tidak** menghapus temuan OP-05 | Cabut sementara hak tulis/baca OP-06 (mis. `revoke select on "Payroll_Records" from service_role;`), jalankan, lalu kembalikan (`grant select ...`) |
-| 3 | Duplicate finding delivery (retry execution_id sama) | `EMP7032` | `cmd_685e727f698af6056739c1cb0d3493f2` (**sama persis** dengan #1) | Satu finding gabungan, satu case idempotent — tidak ada duplikat di `workbench_cases`/`policy_evaluations` | Jalankan langsung setelah #1, tanpa ubah data |
-| 4 | Reason code tidak dikenal dari salah satu branch | `EMP7008` | `cmd_75a27d34818030aef4d5ac5b329959e5` | Tidak ada case/Slack apa pun untuk kode ini — hanya satu `system_exception`; branch lain untuk `EMP7008` (kalau ada) tetap jalan normal | Suntik `reason_code="XYZ_UNREGISTERED_CODE"` di salah satu finding upstream test, sama seperti §6 4.R2.1 test #13 |
-| 5 | Confidential + standard bersamaan | `EMP7003` | `cmd_10fbb44d3d8a71e412e869c3cc3e2ab0` | Dua route independen jalan (confidential + Day-1 standar); tidak ada data sensitif nyeberang ke branch standar | Fixture sama seperti §6 4.R2.2: update `Comment` `PK-5006` + `Cross_Team_Dependencies.DEP-10015` jadi `In Progress`; revert setelah test |
+| 1 | Multi-domain, dua Operator sekaligus | `EMP7032` | `cmd_685e727f698af6056739c1cb0d3493f2` | Hasil OP-05 (`COMPLIANCE_DEADLINE_AT_RISK`) **dan** OP-06 (tergantung status payroll `EMP7032` saat ini) sama-sama selamat di merge; masing-masing route ke case terpisah (compliance vs payroll), tidak tercampur. Di Activity Timeline, stempel waktu OP-05/OP-06/OP-07 harus **tumpang tindih**, bukan berurutan — itu bukti fan-out paralel yang diminta §9, dan tidak bisa digantikan klaim selesai | Tidak ada |
+| 2 | Satu branch gagal, yang lain tetap jalan | `EMP7032` | `cmd_cc2392e2c28db7cb5245cefe620c97be` | Temuan OP-05 tetap ada dan ter-route normal; branch OP-06 yang gagal muncul sebagai satu `system_exception` terpisah, **tidak** menghapus temuan OP-05 | Sebelum run: `revoke select on "Payroll_Records" from service_role;`<br>Sesudah run, **wajib**: `grant select on "Payroll_Records" to service_role;`<br>Verifikasi kembali pulih: `select count(*) from "Payroll_Records";` |
+| 3 | Duplicate finding delivery (retry execution_id sama) | `EMP7032` | `cmd_685e727f698af6056739c1cb0d3493f2` (**sama persis** dengan #1) | Satu finding gabungan, satu case idempotent — tidak ada duplikat di `workbench_cases`/`policy_evaluations` | Jalankan langsung setelah #1, tanpa mengubah data apa pun. Ketik `command_id` yang identik dengan #1 supaya ORCH-01 menurunkan `execution_id` yang sama. Bandingkan sesudahnya: `select count(*) from "policy_evaluations" where "execution_id" = 'cmd_685e727f698af6056739c1cb0d3493f2';` dan `select count(*) from "workbench_cases" where "employee_id" = 'EMP7032';` — keduanya harus sama dengan angka sesudah #1 |
+| 4 | Reason code tidak dikenal dari salah satu branch | `EMP7008` | `cmd_75a27d34818030aef4d5ac5b329959e5` | Tidak ada case/Slack apa pun untuk kode ini — hanya satu `system_exception`; branch lain untuk `EMP7008` (kalau ada) tetap jalan normal | **Tidak bisa dijalankan lewat Command Center**: `app/routers/hr.py:621` menolak `reason_code` di luar `KNOWN_REASON_CODES` dengan HTTP 422 sebelum Auto dipanggil sama sekali. Jalankan dari test form Auto langsung dengan `reason_code="XYZ_UNREGISTERED_CODE"`. Perlu diketahui: cara ini menguji guard ORCH atas *input hint*, bukan atas kode yang dipancarkan sebuah branch. Untuk menguji jalur branch yang sebenarnya, satu Operator harus diprompt sementara agar memancarkan kode itu, lalu dikembalikan — dua eksekusi builder. Catat mana yang dipakai |
+| 5 | Confidential + standard bersamaan | `EMP7003` | `cmd_10fbb44d3d8a71e412e869c3cc3e2ab0` | Dua route independen jalan (confidential + Day-1 standar); tidak ada data sensitif nyeberang ke branch standar. String `SENTINEL_SECRET_HEALTH_XYZ` tidak muncul di case standar, `workflow_events`, Activity Timeline, log, maupun di teks alert confidential itu sendiri | Sebelum run:<br>`update "Peakon_Engagement" set "Comment" = 'Managing, though I have been dealing with SENTINEL_SECRET_HEALTH_XYZ and have not felt able to raise it with my manager yet.' where "Response_ID" = 'PK-5006';`<br>`update "Cross_Team_Dependencies" set "status" = 'In Progress' where "dep_id" = 'DEP-10015';`<br>Sesudah run, **wajib**:<br>`update "Peakon_Engagement" set "Comment" = 'Managing, though I have been dealing with a health matter and have not felt able to raise it with my manager yet.' where "Response_ID" = 'PK-5006';`<br>`update "Cross_Team_Dependencies" set "status" = 'Done' where "dep_id" = 'DEP-10015';` |
+
+**Verifikasi tiap baris.** Ganti `<cmd>` dengan `command_id` baris yang
+bersangkutan; `execution_id` yang tersimpan adalah turunannya. Khusus run tanpa
+`command_id` (terjadwal/Typeform), baca dulu `execution_id` bentuk `cmd_auto_...`
+dari output step 1 atau Activity Timeline dan pakai nilai itu. Jalankan
+keempatnya, bukan hanya yang pertama — bukti yang diminta tracker adalah baris
+database, bukan output step.
+
+```sql
+select "policy_key", "outcome", "action", "policy_version_id", "evaluated_at"
+from "policy_evaluations" where "execution_id" = '<cmd>' order by "evaluated_at";
+
+select "operator_id", "event_type", "status", "reason_codes", "details", "occurred_at"
+from "workflow_events" where "execution_id" = '<cmd>' order by "sequence_no";
+
+select "command_id", "status", "auto_run_id", "reconciliation_status", "error_code"
+from "command_runs" where "command_id" = '<cmd>';
+
+select "case_id", "case_type", "priority", "status", "created_at"
+from "workbench_cases" where "employee_id" = 'EMP7032' order by "created_at" desc limit 10;
+```
+
+**Cek kebocoran privasi setelah #5** — harus mengembalikan nol baris:
+
+```sql
+select "event_id", "execution_id" from "workflow_events"
+where "details"::text like '%SENTINEL_SECRET_HEALTH_XYZ%'
+   or "reason_codes"::text like '%SENTINEL_SECRET_HEALTH_XYZ%';
+
+select "case_id" from "workbench_cases"
+where "sanitized_context"::text like '%SENTINEL_SECRET_HEALTH_XYZ%';
+```
+
+**Bersih-bersih setelah kelima baris selesai.** Semua wajib, tidak opsional:
+
+```sql
+grant select on "Payroll_Records" to service_role;
+
+update "Peakon_Engagement" set "Comment" = 'Managing, though I have been dealing with a health matter and have not felt able to raise it with my manager yet.' where "Response_ID" = 'PK-5006';
+
+update "Cross_Team_Dependencies" set "status" = 'Done' where "dep_id" = 'DEP-10015';
+
+select "Response_ID", "Comment" from "Peakon_Engagement" where "Response_ID" = 'PK-5006';
+select "dep_id", "status" from "Cross_Team_Dependencies" where "dep_id" = 'DEP-10015';
+```
+
+`PK-5006` dipakai juga oleh §5 OP-03 test #4/#5 dan §6 4.R2.2, jadi komentar yang
+tidak dikembalikan akan mencemari ketiganya.
 
 ### O.2 — Command event correlation
 
@@ -1406,9 +1522,16 @@ Goal: make ORCH-01 observable by the Command Center without exposing raw data.
 
 Continue ORCH-01.
 
-- Preserve command_id from Command Center input as execution_id. For scheduled
-  or Typeform-parented runs without command_id, preserve the stable Auto run ID
-  as execution_id so the FastAPI reconciler can discover and correlate the run.
+- Preserve command_id from Command Center input as execution_id.
+
+- For scheduled or Typeform-parented runs there is no command_id. Derive the
+  execution_id instead as the literal string "cmd_auto_" followed by the first
+  24 lowercase hex characters of sha256(auto_run_id), where auto_run_id is the
+  stable Auto run UUID. That is exactly the id the FastAPI reconciler
+  synthesizes when it adopts an orphan Auto run, so findings written under it
+  correlate the moment the command_runs row appears. Do not use the bare Auto
+  run UUID: the reconciler stores that in auto_run_id, not command_id, and every
+  run view queries on execution_id, so those findings stay invisible.
 
 - Do NOT emit queued, running, or terminal lifecycle events, and do not call
   persist_workflow_event. The Command Center already derives those from the Auto
@@ -1418,20 +1541,33 @@ Continue ORCH-01.
 - Emit one finding event per Operator finding by calling the RPC
   record_finding_event over Supabase REST. Its arguments are matched by name, so
   send exactly these keys and no others:
-    target_command_id     the execution_id of this run
-    new_event_id          stable, unique per finding
-    new_source_event_id   stable per (execution_id, operator, reason_code,
-                          employee_id) so a replay recomputes the same value
+    target_command_id     the execution_id derived above: the Command Center
+                          command_id, or the cmd_auto_ form for scheduled and
+                          Typeform-parented runs. Lowercase. Any other value is
+                          rejected, because a finding written against an unknown
+                          execution id is invisible to every run view. Never
+                          send null, and never send the bare Auto run UUID.
+    new_event_id          sha256 of execution_id|operator|reason_code|employee_id
+    new_source_event_id   the same sha256 input, so a replay of the same finding
+                          recomputes both identifiers unchanged
     operator              "OP-01".."OP-07", or "orchestrator"
     subject_employee_id   employee this finding is about, or null
     subject_cohort        cohort for cohort-scope runs, or null
     safe_reason_codes     JSON array of registered reason codes
     safe_details          exactly {"source": "auto_workflow"}
-  Both ID arguments are required. The RPC returns true when a row was inserted
-  and false when it was suppressed — because the run is already terminal,
-  because cancellation was requested, because that source event was already
-  recorded, or because no registered reason code survived filtering. A false
-  return is a normal outcome, not an error: never retry it and never raise.
+  Both identifiers must include execution_id in their input. Deriving them from
+  the finding alone makes two different runs collide on one event_id, and the
+  second run's finding is then rejected as a replay and lost.
+  Pass an employee or a cohort, never both. Both must already exist in Workers;
+  the RPC rejects an unknown subject rather than storing it.
+
+  The RPC returns true when a row was inserted and false when it was suppressed
+  — because the run is already terminal, because cancellation was requested,
+  because that finding was already recorded, or because no registered reason
+  code survived filtering. A false return is a normal outcome, not an error:
+  never retry it and never raise on it. An actual error response means malformed
+  input (unknown operator, missing identifier, unknown subject); surface that as
+  a system exception, because retrying it will fail identically.
 
 - Never put REST responses, finding prose, or any payroll field into
   safe_details. The RPC drops every key except "source" and "error_type", so
@@ -1446,13 +1582,20 @@ Continue ORCH-01.
 
 **Tests:**
 
-| # | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan |
+Sama seperti O.1: kolom di bawah adalah **`command_id`, field input yang
+diketik**; `execution_id` bukan field input dan diturunkan ORCH-01 dari
+`command_id`, jadi `command_id` yang sama menghasilkan `execution_id` yang sama.
+Baris #5 tidak punya `command_id` sama sekali — di situ `execution_id` berbentuk
+`cmd_auto_` + 24 hex pertama `sha256(auto_run_id)` dan **harus dibaca dari output
+step 1 atau Activity Timeline** sebelum bisa dipakai di SQL verifikasi.
+
+| # | Scenario | employee_id | command_id (input; `execution_id` diturunkan darinya) | Expected output | Tindakan tambahan |
 |---|---|---|---|---|---|
 | 1 | Korelasi Command Center run | `EMP7032` | `cmd_16fc077348809fd328f874daf71be609` | Query `command_runs` dan `workflow_events` untuk `command_id`/`execution_id` ini: nilainya **identik**; urutan event `queued -> running -> completed` konsisten dengan Activity Timeline Auto. Tambahan setelah pembagian kepemilikan event: setiap baris `event_type='finding'` harus punya `operator_id` yang benar-benar `OP-0x` (bukan `orchestrator`) dan `details` persis `{"source":"auto_workflow"}`; sebaliknya **tidak boleh** ada baris lifecycle dengan `operator_id` selain `orchestrator`, karena itu berarti ORCH ikut menulis lifecycle | Jalankan lewat Command Center (bukan test form Auto langsung) supaya `command_id` benar-benar berasal dari `app/services/hr.py` |
-| 2 | Replay source_event_id sama | `EMP7032` | `cmd_16fc077348809fd328f874daf71be609` (**sama persis** dengan #1) | `select count(*) from "workflow_events" where execution_id=...;` jumlahnya **tidak bertambah** dibanding setelah #1 — replay tidak menambah event baru. Dua mekanisme berbeda yang menahannya, dan keduanya harus dibuktikan: run yang sudah terminal membuat `execute_stream` gagal klaim sehingga tidak ada event lifecycle baru, dan `record_finding_event` menolak `new_source_event_id` yang sudah pernah tercatat sehingga tidak ada finding baru. Kalau jumlahnya bertambah, cek dulu `event_type` baris tambahannya untuk tahu mekanisme mana yang bocor | Jalankan ulang langsung setelah #1 dengan input identik (idempotency key sama, supaya `create_run` mengembalikan `command_id` yang sama) |
+| 2 | Replay source_event_id sama | `EMP7032` | `cmd_16fc077348809fd328f874daf71be609` (**sama persis** dengan #1) | `select count(*) from "workflow_events" where execution_id=...;` jumlahnya **tidak bertambah** dibanding setelah #1 — replay tidak menambah event baru. Dua mekanisme berbeda yang menahannya, dan keduanya harus dibuktikan: run yang sudah terminal membuat `execute_stream` gagal klaim sehingga tidak ada event lifecycle baru, dan `record_finding_event` menolak `new_source_event_id` yang sudah pernah tercatat sehingga tidak ada finding baru. Kalau jumlahnya bertambah, cek dulu `event_type` baris tambahannya untuk tahu mekanisme mana yang bocor | Jalankan ulang langsung setelah #1 dengan input identik. Dari Command Center: pakai idempotency key yang sama supaya `create_run` mengembalikan `command_id` yang sama. Dari test form Auto: ketik `command_id` yang sama persis dengan #1 — `execution_id` diturunkan darinya, jadi replay-nya tetap sah |
 | 3 | Reconnect SSE di tengah run | `EMP7062` (payroll, biar durasinya cukup lama untuk sempat disconnect) | `cmd_f0bbcaa278c91ecbdf908f654291825f` | Setelah reconnect ke stream SSE Command Center, event yang diterima lanjut dari nomor urut terakhir yang sudah diterima sebelum disconnect — tidak mengulang dari awal, tidak ada gap | Manual: buka halaman yang subscribe SSE, matikan koneksi jaringan sebentar di tengah run, nyalakan lagi |
 | 4 | Terminal state sekali walau sempat retry | `EMP7062` | `cmd_1ba458fa9c0d32d490bd2314b138d303` | Tepat satu event terminal (`completed`/`failed`/`cancelled`) di `workflow_events` untuk `execution_id` ini, walau salah satu Operator sempat retry beberapa kali sebelum akhirnya berhasil/gagal | Sebelum run, buat salah satu branch (mis. OP-06) gagal sekali lalu berhasil di percobaan retry berikutnya — gunakan teknik toggle env var yang sama seperti §5.3 test #3 |
-| 5 | Run terjadwal tanpa command_id | — (`trigger_source=daily_schedule`) | Tidak ada `execution_id` manual; pakai Auto run ID otomatis | `command_runs`/`workflow_events` tetap punya baris yang bisa dikorelasikan lewat Auto run ID; endpoint `POST /runs/reconcile` di Command Center bisa menemukan run ini | Trigger manual test run dari Daily Cohort Sweep (§8), bukan dari Command Center |
+| 5 | Run terjadwal tanpa command_id | — (`trigger_source=daily_schedule`) | Tidak diketik. `execution_id` dibangkitkan saat run sebagai `cmd_auto_` + 24 hex pertama `sha256(auto_run_id)`; baca nilainya dari output step 1 atau Activity Timeline setelah run, lalu pakai itu di SQL verifikasi | `command_runs`/`workflow_events` tetap punya baris yang bisa dikorelasikan lewat Auto run ID; endpoint `POST /runs/reconcile` di Command Center bisa menemukan run ini | Trigger manual test run dari Daily Cohort Sweep (§8), bukan dari Command Center |
 | 6 | Cancellation mencegah aksi lanjutan | `EMP7062` | `cmd_ab53176b83db40ac5da36561c1bcbe52` | Setelah `cancel_requested_at` di-set, tidak ada case/notification baru yang tertulis untuk branch yang belum sempat jalan; event terminal `cancelled` tertulis sekali. Tidak ada baris `event_type='finding'` dengan `occurred_at` setelah `cancel_requested_at` — `record_finding_event` mengembalikan `false` begitu kolom itu terisi, jadi finding yang telat tidak masuk ledger meski branch-nya sudah terlanjur menghitung | Mulai run, lalu segera panggil `POST /runs/{command_id}/cancel` sebelum branch OP-06/OP-07 sempat selesai |
 
 ## 8. Daily cohort sweep parent workflow

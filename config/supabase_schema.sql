@@ -524,6 +524,181 @@ $$;
 revoke all on function public.persist_workflow_event(text, text, text, text, text, jsonb, text) from public, anon, authenticated;
 grant execute on function public.persist_workflow_event(text, text, text, text, text, jsonb, text) to service_role;
 
+-- Registered Round 2 reason codes.  This list mirrors KNOWN_REASON_CODES in
+-- app/services/hr.py; the two must be changed together.
+create or replace function public.hr_known_reason_codes()
+returns text[]
+language sql
+immutable
+set search_path = public
+as $$
+  select array[
+    'MISSING_DAY_ONE_ACCESS', 'STALLED_COMPLIANCE_DOC', 'TASK_ALREADY_ESCALATED',
+    'PROVISIONING_DELAYED', 'LOW_ENGAGEMENT_SCORE', 'SENSITIVE_DISCLOSURE_DETECTED',
+    'COMPLIANCE_DEADLINE_AT_RISK', 'COMPLIANCE_LEGAL_BREACH', 'WORK_AUTH_EXPIRY_AT_RISK',
+    'WORK_AUTH_EXPIRED', 'PAYROLL_ERROR_DETECTED', 'PAYROLL_NOT_CONFIRMED',
+    'PAYROLL_RECORD_MISSING', 'DAY_ONE_DEPENDENCY_BLOCKED', 'LEARNING_MILESTONE_OVERDUE',
+    'MANAGER_ACKNOWLEDGMENT_OVERDUE', 'MANAGER_ACTION_OVERDUE', 'COHORT_DEPENDENCY_BOTTLENECK'
+  ];
+$$;
+revoke all on function public.hr_known_reason_codes() from public, anon, authenticated;
+grant execute on function public.hr_known_reason_codes() to service_role;
+
+-- Per-Operator finding ledger entry.  ORCH-01 owns finding events; the Command
+-- Center owns the queued/running/terminal lifecycle through
+-- persist_workflow_event.  This function never writes command_runs.status, so
+-- the two writers cannot race on the same state machine.
+--
+-- Returns true only when a row was actually inserted, which is why the insert
+-- is wrapped in its own block instead of using ON CONFLICT DO NOTHING: a
+-- swallowed conflict must be reported as false, never as a silent success.
+-- False — without raising — means the run is already terminal, cancellation was
+-- requested, this event or source event was already recorded, or no registered
+-- reason code survived filtering.  An unregistered code must reach the Command
+-- Center as a system exception, never as a finding.
+--
+-- Malformed input raises instead: an unknown operator, a missing identifier, or
+-- a subject that does not exist is a caller defect, and returning false there
+-- would hide it.
+create or replace function public.record_finding_event(
+  target_command_id text,
+  new_event_id text,
+  new_source_event_id text,
+  operator text,
+  subject_employee_id text default null,
+  subject_cohort text default null,
+  safe_reason_codes jsonb default '[]'::jsonb,
+  safe_details jsonb default '{}'::jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_status text;
+  cancellation_requested timestamptz;
+  accepted_codes jsonb;
+  accepted_details jsonb;
+  namespaced_source_id text;
+begin
+  if operator is null or not (operator = 'orchestrator' or operator ~ '^OP-0[1-7]$') then
+    raise exception 'Unknown operator id';
+  end if;
+  if new_event_id is null or new_event_id = ''
+     or new_source_event_id is null or new_source_event_id = '' then
+    raise exception 'Finding event requires event_id and source_event_id';
+  end if;
+  -- A null execution_id would defeat every guard below: the unique index on
+  -- (execution_id, source_event_id) treats SQL nulls as distinct, so replays
+  -- would insert freely, and the resulting rows are orphaned from every run
+  -- view because those all filter on execution_id.
+  if target_command_id is null or btrim(target_command_id) = '' then
+    raise exception 'Finding event requires an execution id';
+  end if;
+  -- Canonicalise BEFORE the command_runs lookup below, never after.  Every id
+  -- this system mints is lowercase — both cmd_ and cmd_auto_ come from a
+  -- sha256 hexdigest, and Auto run UUIDs are lowercase — while the lookup, the
+  -- unique index, and the run-events reader all match byte-exactly.  Lowering
+  -- after the lookup would let a mixed-case spelling miss its own run row, fall
+  -- through to the no-run branch, skip the terminal and cancellation guards
+  -- entirely, and then land under the canonical id where the endpoint serves it.
+  target_command_id := lower(target_command_id);
+
+  -- A finding is about one worker or one cohort, never both, mirroring the
+  -- scope rule command_runs already enforces for itself.
+  if subject_employee_id is not null and subject_cohort is not null then
+    raise exception 'Finding event takes an employee or a cohort, not both';
+  end if;
+  -- Validate the subject by reference rather than by format.  Without this the
+  -- strict details allowlist below is trivially bypassed: an arbitrary string
+  -- placed in employee_id or cohort is stored verbatim and served by the run
+  -- events endpoint, which sanitizes neither column.
+  if subject_employee_id is not null and not exists (
+    select 1 from "Workers" where "Employee_ID" = subject_employee_id
+  ) then
+    raise exception 'Unknown finding subject employee';
+  end if;
+  if subject_cohort is not null and not exists (
+    select 1 from "Workers" where "cohort" = subject_cohort
+  ) then
+    raise exception 'Unknown finding subject cohort';
+  end if;
+
+  -- The two writers no longer share the command_runs state machine, but they do
+  -- share the (execution_id, source_event_id) unique index.  Namespacing keeps a
+  -- finding from claiming an id a later lifecycle event needs, which would abort
+  -- that terminal transaction and strand the run in "running" forever.
+  namespaced_source_id := 'finding:' || new_source_event_id;
+
+  select "status", "cancel_requested_at" into current_status, cancellation_requested
+    from "command_runs" where "command_id" = target_command_id for update;
+  -- Scheduled and Typeform-parented runs carry the Auto run ID as execution_id
+  -- and have no command_runs row at all, so there is no lifecycle to gate
+  -- against.  Raising there would fail every finding from the Daily Cohort
+  -- Sweep.  But an execution_id that is neither a known command nor an Auto run
+  -- UUID is a typo, and accepting it writes a finding no run view can ever
+  -- surface, so that case still raises.
+  --
+  -- Two shapes are accepted before adoption.  The preferred one is the id the
+  -- reconciler will itself synthesize for an orphan Auto run,
+  -- 'cmd_auto_' || left(sha256(auto_run_id), 24) — see
+  -- AutoRunReconciler._discover in app/services/reconciliation.py.  Writing
+  -- findings under that id means they already correlate once the command_runs
+  -- row appears.  A bare Auto run UUID is still accepted, but findings written
+  -- that way stay under the UUID and will not show up in the adopted run's
+  -- views, so ORCH-01 should derive the cmd_auto_ form instead.
+  -- Lowercase classes suffice: the value was canonicalised before the lookup.
+  if current_status is null then
+    if target_command_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+       and target_command_id !~ '^cmd_auto_[0-9a-f]{24}$' then
+      raise exception 'Unknown execution id: not a command run and not an Auto run id';
+    end if;
+  else
+    if current_status in ('completed', 'failed', 'cancelled') then return false; end if;
+    if cancellation_requested is not null then return false; end if;
+  end if;
+
+  -- Distinct: a branch that reports the same reason code twice must not widen
+  -- the stored array, because readers count reason codes.
+  select coalesce(jsonb_agg(distinct candidate.code), '[]'::jsonb) into accepted_codes
+    from jsonb_array_elements_text(
+      case when jsonb_typeof(safe_reason_codes) = 'array'
+        then safe_reason_codes else '[]'::jsonb end
+    ) as candidate(code)
+   where candidate.code = any (public.hr_known_reason_codes());
+  if jsonb_array_length(accepted_codes) = 0 then return false; end if;
+
+  -- Narrative, REST responses, and restricted payroll detail never enter the
+  -- ledger: only the two allowlisted keys survive, and only as strings, so a
+  -- nested object cannot ride in under an allowed key.
+  select coalesce(jsonb_object_agg(entry.key, entry.value), '{}'::jsonb) into accepted_details
+    from jsonb_each(
+      case when jsonb_typeof(safe_details) = 'object'
+        then safe_details else '{}'::jsonb end
+    ) as entry(key, value)
+   where entry.key in ('source', 'error_type')
+     and jsonb_typeof(entry.value) = 'string';
+
+  begin
+    insert into "workflow_events" (
+      "event_id", "source_event_id", "execution_id", "employee_id", "cohort",
+      "operator_id", "event_type", "status", "reason_codes", "details"
+    ) values (
+      new_event_id, namespaced_source_id, target_command_id, subject_employee_id,
+      subject_cohort, operator, 'finding', 'running', accepted_codes, accepted_details
+    );
+  exception when unique_violation then
+    -- Covers a replayed event_id and a replayed (execution_id, source_event_id)
+    -- alike, including the unlocked scheduled-run path above.
+    return false;
+  end;
+  return true;
+end;
+$$;
+revoke all on function public.record_finding_event(text, text, text, text, text, text, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.record_finding_event(text, text, text, text, text, text, jsonb, jsonb) to service_role;
+
 create or replace function public.claim_reconciliation_lease(
   lease_owner text,
   lease_seconds integer

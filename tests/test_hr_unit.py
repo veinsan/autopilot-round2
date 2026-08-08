@@ -6,6 +6,7 @@ on Supabase, Keycloak, or Auto being reachable.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -26,6 +27,7 @@ from app.routers.hr import (
     list_policies,
     set_policy_visibility,
     record_manager_action_event,
+    run_events,
     update_policy_draft,
 )
 from app.schemas.hr import (
@@ -40,6 +42,8 @@ from app.services.hr import (
     HROpsService,
     KNOWN_REASON_CODES,
     PolicyEvaluator,
+    SAFE_EVENT_TYPES,
+    SAFE_OPERATOR_IDS,
     assert_manager_owns_employee,
     can_access_payroll_cases,
     case_domain_scope,
@@ -452,6 +456,165 @@ def test_case_and_event_contracts_use_positive_allowlists() -> None:
     }
     assert events[0]["reason_codes"] == ["DAY_ONE_DEPENDENCY_BLOCKED"]
     assert events[0]["details"] == {"source": "auto_run_status"}
+
+
+def _finding_event_row(**overrides: Any) -> dict[str, Any]:
+    """A workflow_events row shaped exactly like public.record_finding_event writes."""
+    row = {
+        "event_id": "finding-1",
+        "sequence_no": 2,
+        "occurred_at": "2026-08-07T09:00:00+00:00",
+        "operator_id": "OP-05",
+        "event_type": "finding",
+        "status": "running",
+        "reason_codes": ["LOW_ENGAGEMENT_SCORE"],
+        "details": {"source": "auto_workflow"},
+    }
+    row.update(overrides)
+    return row
+
+
+def test_finding_event_operator_and_type_are_already_allowlisted() -> None:
+    assert "OP-05" in SAFE_OPERATOR_IDS
+    assert "finding" in SAFE_EVENT_TYPES
+    assert {f"OP-{number:02d}" for number in range(1, 8)} <= SAFE_OPERATOR_IDS
+
+
+def test_finding_event_keeps_operator_type_and_registered_reason_codes() -> None:
+    events = sanitize_event_rows(
+        [
+            _finding_event_row(
+                reason_codes=["LOW_ENGAGEMENT_SCORE", "MANAGER_ACTION_OVERDUE"]
+            )
+        ]
+    )
+
+    assert events[0]["operator_id"] == "OP-05"
+    assert events[0]["event_type"] == "finding"
+    assert events[0]["status"] == "running"
+    assert events[0]["reason_codes"] == [
+        "LOW_ENGAGEMENT_SCORE",
+        "MANAGER_ACTION_OVERDUE",
+    ]
+    assert events[0]["details"] == {"source": "auto_workflow"}
+
+
+def test_finding_event_drops_unregistered_reason_code() -> None:
+    events = sanitize_event_rows(
+        [
+            _finding_event_row(
+                reason_codes=["LOW_ENGAGEMENT_SCORE", "NOT_A_REGISTERED_CODE"]
+            )
+        ]
+    )
+
+    assert "NOT_A_REGISTERED_CODE" not in KNOWN_REASON_CODES
+    assert events[0]["reason_codes"] == ["LOW_ENGAGEMENT_SCORE"]
+
+
+def test_finding_event_details_keep_only_the_allowlisted_keys() -> None:
+    events = sanitize_event_rows(
+        [
+            _finding_event_row(
+                details={
+                    "source": "auto_workflow",
+                    "error_type": "auto_execution_error",
+                    "narrative": "pulse comment quoted verbatim",
+                }
+            )
+        ]
+    )
+
+    assert events[0]["details"] == {
+        "source": "auto_workflow",
+        "error_type": "auto_execution_error",
+    }
+
+
+def test_run_events_streams_findings_with_lifecycle_events_in_sequence_order() -> None:
+    repo = FakeRepository(
+        {
+            "command_runs": [
+                {
+                    "command_id": "cmd-1",
+                    "created_by": "ops-1",
+                    "status": "completed",
+                    "scope": "employee",
+                    "employee_id": "EMP-1",
+                }
+            ],
+            "workflow_events": [
+                {
+                    "event_id": "lifecycle-queued",
+                    "execution_id": "cmd-1",
+                    "sequence_no": 1,
+                    "occurred_at": "2026-08-07T08:59:00+00:00",
+                    "operator_id": "orchestrator",
+                    "event_type": "workflow-run",
+                    "status": "queued",
+                    "reason_codes": [],
+                    "details": {},
+                },
+                _finding_event_row(
+                    event_id="finding-op05",
+                    execution_id="cmd-1",
+                    sequence_no=2,
+                ),
+                _finding_event_row(
+                    event_id="finding-op07",
+                    execution_id="cmd-1",
+                    sequence_no=3,
+                    operator_id="OP-07",
+                    reason_codes=["COHORT_DEPENDENCY_BOTTLENECK"],
+                ),
+                {
+                    "event_id": "lifecycle-result",
+                    "execution_id": "cmd-1",
+                    "sequence_no": 4,
+                    "occurred_at": "2026-08-07T09:01:00+00:00",
+                    "operator_id": "orchestrator",
+                    "event_type": "result",
+                    "status": "completed",
+                    "reason_codes": [],
+                    "details": {},
+                },
+            ],
+        }
+    )
+    hr = HROpsService(repo)  # type: ignore[arg-type]
+    user = {"sub": "ops-1", "realm_access": {"roles": ["people_ops"]}}
+
+    response = run_events("cmd-1", last_event_id=None, user=user, hr=hr)
+
+    async def collect() -> str:
+        chunks: list[str] = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk if isinstance(chunk, str) else chunk.decode())
+        return "".join(chunks)
+
+    stream = asyncio.run(collect())
+    payloads = [
+        json.loads(line[len("data: ") :])
+        for line in stream.splitlines()
+        if line.startswith("data: ") and line != "data: {}"
+    ]
+
+    assert [payload["event_id"] for payload in payloads] == [
+        "lifecycle-queued",
+        "finding-op05",
+        "finding-op07",
+        "lifecycle-result",
+    ]
+    assert [payload["sequence_no"] for payload in payloads] == [1, 2, 3, 4]
+    assert [payload["event_type"] for payload in payloads] == [
+        "workflow-run",
+        "finding",
+        "finding",
+        "result",
+    ]
+    assert payloads[1]["operator_id"] == "OP-05"
+    assert payloads[2]["reason_codes"] == ["COHORT_DEPENDENCY_BOTTLENECK"]
+    assert stream.endswith("event: complete\ndata: {}\n\n")
 
 
 def test_user_roles_merges_realm_and_configured_client_roles(
