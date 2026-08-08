@@ -2014,6 +2014,98 @@ Every test block starts by re-querying the active policy, and raw Activity
 Timeline + direct Supabase rows remain the source of truth.
 
 
+## 9.3 Deferred register — raise only after the E2E rehearsal
+
+Everything below is known, deliberately deferred, and **not** to be raised again
+until the §9 acceptance rehearsal has been completed. None of it blocks the MVP.
+Work the list only after E2E, in roughly this order.
+
+### Correctness, fix before a public demo
+
+- ORCH-01 stage 1's step description in Auto Studio still reads "mocks config
+  snapshot". The code no longer does; only the description text is stale. It is
+  visible in the Activity Timeline and reads like the system is running on fake
+  data. One sentence in a builder prompt, bundled with any other stage-1 change.
+- OP-01 Date Parsing raises a spurious escalation on a successful parse, so every
+  OP-01 run leaves one false human-review item in the Workbench. The rewrite
+  prompt exists and is unrun. OP-01 is Typeform-parented and is not part of the
+  ORCH fan-out, so it does not pollute an ORCH demo — but it does pollute the
+  Workbench view.
+- OP-01 Date Parsing resolves an ambiguous `10/08/2026` to 8 October instead of
+  escalating. Covered by the same unrun prompt.
+- Leftover OP-01 test worker `d20baf3d-abf2-4e8f-90be-8848437a5817`. Delete by
+  `Worker_WID`, never by a `Legal_Name like 'Farah%'` pattern — `EMP7040`,
+  `EMP7078` and `EMP7106` are real dataset workers.
+
+### Contract debt
+
+- The five Operators do not share one envelope. OP-02 omits `operator_id`,
+  `employee_id` and `findings` entirely; OP-05 emits `findings` entries shaped
+  `{item, status, due_date}` with no `reason_code`, so its routable codes live
+  only in `reasons`; OP-06 returns `{action_taken, status, message}` with no
+  envelope keys at all. ORCH-01's merge stage normalizes all three at the
+  boundary and records the dialect in `extraction_debug`. Conforming the
+  Operators is the real fix; the normalization is a documented stopgap, not a
+  disguise.
+- OP-06 returns no `policy_version_id` and no `evaluated_at`, so that branch
+  cannot prove it read the active policy. Normalization lets it pass; it does not
+  cure it.
+- ORCH-01 no longer routes `system_exceptions` to OP-04, so an exception produces
+  no Workbench case — it appears only in the final output. This was a deliberate
+  trade: routing them was sending Slack notifications for branch failures, and a
+  noisy demo channel costs more than a missing exception case. Restoring them
+  requires changing OP-04's input contract too. Degraded-mode acceptance evidence
+  is already satisfied by §5.3, which passed 3/3.
+- `persist_workflow_event` carries the same defect that was removed from
+  `record_finding_event`: `on conflict ("event_id") do nothing` followed by an
+  unconditional `return true`, so a replayed lifecycle event reports success while
+  dropping the row and still advancing `command_runs.status`. Its caller ignores
+  the return value, so the live impact today is nil. Fix for symmetry once the
+  lifecycle path is no longer under test.
+
+### External blockers, not our work
+
+- Auto's REST read surface returns `{"message":"Unexpected Server Error"}` with
+  HTTP 400 on `GET /api/v1/workflows` and `GET /api/v1/workflow-runs`, identically
+  for a valid and a deliberately-invalid key, with the documented parameters. The
+  request contract in `app/services/auto.py` matches the published API docs, so
+  this is upstream. Consequence: `AutoWorkflowClient.list_runs` and therefore
+  `AutoRunReconciler` cannot function, which blocks ORCH-01 O.2 test #5 and the
+  Daily Cohort Sweep discovery path. Re-probe before assuming it is still broken.
+
+### Not run, with the reason each is safe to skip
+
+- O.1 test #2 (branch failure) — degraded-mode acceptance is covered by §5.3
+  tests #1–#3, already `Passed 3/3`.
+- O.1 test #3 (replay idempotency) — covered across four other layers: §5.2 #7,
+  §6.2 #4, §7.3 #2.
+- O.1 test #4 (unregistered reason code) — cannot be driven through the Command
+  Center at all, because `app/routers/hr.py` rejects an unknown `reason_code` with
+  HTTP 422 before Auto is called. Driving it from the Auto test form tests the
+  input-hint guard, not a code emitted by a branch; testing the branch path needs
+  a temporary Operator change and two builder executions.
+- O.1 test #5 (confidential + standard together) — privacy acceptance is covered
+  by §6.1 test #3 and §5 OP-03 test #4; no sentinel string has leaked in any
+  Operator-level test to date.
+- Whole of O.2 — depends on the RPC below being applied and on the external
+  blocker above. No acceptance criterion rests on O.2 alone.
+
+### Pending application
+
+- `public.record_finding_event` and `public.hr_known_reason_codes` exist in
+  `config/supabase_schema.sql` but have **not** been applied to Supabase. They are
+  verified across four empirical review rounds against a scratch PostgreSQL
+  cluster. Apply immediately before O.2, not before — once live, an ORCH run
+  launched from the Auto test form with a `cmd_`-shaped id that has no
+  `command_runs` row will be rejected by the RPC's execution-id guard.
+- O.1 test #5 was skipped on the basis that no sentinel string has leaked in any
+  Operator-level test to date. That is evidence from OP-03 and OP-06 in isolation,
+  not from a run where a confidential and a standard finding are routed
+  simultaneously through ORCH-01 and OP-04. The merge stage partitions the two
+  before deduplication and the routing stage passes `confidential_reasons` as a
+  separate input, but that separation has been read in the code and never
+  exercised end to end. Worth one run after E2E.
+
 ## 10. Build status tracker
 
 Update this table only from raw Activity Timeline and direct database/API
@@ -2024,7 +2116,7 @@ proof. `Builder says done` is not evidence.
 | G-01 | Policy Studio | Active Round 2 policy | Done | Passed | Day-H active version: `policy_15a51b4e58cc4400a8a63ceb49b3cf92`, derived from `policy_round2_v1`; `demo_mode=false`, manager cap `{"default":2}`, bottleneck `2/25`, 18 observed codes. Re-query before every test block. |
 | G-02 | Command Center | Restricted payroll RBAC | Done | Passed | Admin/payroll-reviewer login and restricted payroll visibility verified. |
 | G-03 | Command Center | Manager action-state contract | Done | Passed | Live table/RPC contract and manager state fixtures verified. |
-| G-04 | Runtime config | Published workflow UUID mapping | Not started / unverified | Not started | Required before ORCH-01 publish and Command Center production invocation. |
+| G-04 | Runtime config | Published workflow UUID mapping | Configured | Partially verified | `AUTO_BASE_URL`, `AUTO_API_KEY`, `AUTO_ACTIVE_ORG`, `AUTO_HR_WORKFLOW_ID` semua terisi di `.env`; workflow id berbentuk UUID dan base URL cocok dengan `.env.example`; `auto.supervity.ai/health` 200. Validitas workflow id **tidak** bisa dikonfirmasi lewat API baca — lihat blocker eksternal di §9.3. Bukti definitifnya adalah satu run Command Center yang berhasil. |
 | UI | Command Center | Policy Studio, Workbench, Dashboard, Data Manager | Done | Passed core build/login | Human Workbench action still needed as acceptance evidence. |
 | 5.1 | OP-05 | Context/policy/timezone | Done | Passed core | Valid SG/AU contexts and safe failure behavior verified. |
 | 5.2 | OP-05 | Compliance/work-auth rules + logs | Saved | Core passed | Clear, legal breach, and replay idempotency passed; run one final current-policy/common-envelope regression. |
@@ -2040,7 +2132,7 @@ proof. `Builder says done` is not evidence.
 | C.3 | OP-03 | Active-policy compatibility | Verified / frozen | Passed 6/6 | Latest-score semantics, recovery ordering, confidential + historical disclosure, zero-leakage sentinel, Policy Studio threshold change `5 -> 2`, and restore to baseline all verified. |
 | 4.R2.1 | OP-04 | Round 2 routing/grouped cases | Saved | Partial | Compliance, payroll, unknown code, and dedup passed. Next: five OP-07 routes, cohort insight-only, reopen/CLEAR lifecycle, confidential independence, then freeze. |
 | 4.R2.2 | OP-04 | Confidential independence | Not started | Not started | Required before final privacy acceptance. |
-| O.1 | ORCH-01 | Parallel fan-out/merge/handoff | Not started | Not started | Next major build after Operator regressions/routing. Prompt direvisi 2026-08-08 dengan kontrak input sebenarnya dari `app/routers/hr.py`: hanya lima key (`scope`, `employee_id`, `cohort`, `reason_code`, `command_id`); `execution_id` dan `trigger_source` diturunkan sendiri, `as_of_date` dari `config_snapshot`. |
+| O.1 | ORCH-01 | Parallel fan-out/merge/handoff | Done | **Passed (essential)** | Run 2026-08-08 14:48:31–14:52:29 dari Auto test form, `EMP7032`. Fan-out paralel terbukti dari Activity Timeline: OP-02/03/05/06/07 mulai 14:48:48–14:48:52 (rentang 4 detik) dan berjalan bersamaan ±35 detik — mustahil pada eksekusi serial. Rantai keputusan utuh: Routing Logic completed, `Condition: No Escalation Needed` false, `Condition: Needs Escalation` true, `Call OP-04 Escalation Agent` completed. Merge menghasilkan `COMPLIANCE_LEGAL_BREACH` + `COMPLIANCE_DEADLINE_AT_RISK` (OP-05) dengan `policy_version_ids` nyata; OP-03/OP-06/OP-07 clear. Test #2–#5 sengaja tidak dijalankan — alasan dan bukti penggantinya di §9.3. Kontrak input: lima key dari `app/routers/hr.py`; `execution_id` dan `trigger_source` diturunkan sendiri; stage 1 tidak membaca policy. |
 | O.2 | ORCH-01 | Command/event correlation | Not started | Not started | Depends on O.1 and G-04. Prompt direvisi 2026-08-08: lifecycle tetap milik Command Center (`AutoWorkflowClient.execute_stream`), ORCH hanya menulis finding lewat RPC baru `record_finding_event`. RPC itu harus sudah di-apply ke Supabase sebelum test O.2 dijalankan. |
 | S.1 | Daily Sweep | Schedule/fan-out/cohort aggregation | Not started | Not started | Depends on ORCH-01 and verified OP-07 cohort mode. |
 | E2E | All | Live acceptance rehearsal | Not started | Not started | Policy change → Auto → OP-04 → human Workbench → Dashboard/audit evidence. |
