@@ -324,13 +324,13 @@ export default function ReassessmentRunsPage() {
       )}
 
       {isManagerScoped && mayStartRun && (
-        <Card className='border-brand-cornflower/30'>
-          <CardContent className='p-4 text-sm text-muted-foreground'>
-            Your access covers your direct reports. You can reassess one of them
-            at a time, and People Ops or an administrator stops a reassessment
-            that is already running.
-          </CardContent>
-        </Card>
+        <div className='flex items-start gap-2 text-sm text-muted-foreground'>
+          <Icons.info className='mt-0.5 h-4 w-4 shrink-0 text-brand-purple' />
+          <p className='max-w-3xl'>
+            You can reassess one of your direct reports at a time. People Ops or
+            an administrator stops one that is already running.
+          </p>
+        </div>
       )}
 
       {mayStartRun && (
@@ -373,16 +373,29 @@ export default function ReassessmentRunsPage() {
               </Card>
             ) : (
               <Card>
-                <CardContent className='space-y-3 p-8 text-sm text-muted-foreground'>
-                  <p>
-                    Nothing is being followed right now. Start a reassessment,
-                    or choose one from the list to see how far it got.
-                  </p>
-                  <p>
-                    A reassessment does not change anyone&apos;s record on its
-                    own. What it finds becomes a case in the Workbench for a
-                    person to decide on.
-                  </p>
+                <CardContent className='flex items-start gap-3 p-8 text-sm'>
+                  <Icons.zap className='mt-0.5 h-5 w-5 shrink-0 text-brand-cornflower' />
+                  <div className='space-y-1'>
+                    <p className='font-medium text-brand-navy'>
+                      Nothing is being followed right now
+                    </p>
+                    <p className='text-muted-foreground'>
+                      Start one, or pick one from the list to see how far it
+                      got. Nothing changes on its own — what a reassessment
+                      finds becomes a case for a person to decide on.
+                    </p>
+                    {mayStartRun && (
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        className='mt-3'
+                        onClick={() => setStartOpen(true)}
+                      >
+                        <Icons.zap className='h-4 w-4' />
+                        Start a reassessment
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -408,8 +421,7 @@ export default function ReassessmentRunsPage() {
             </div>
 
             <p className='text-xs text-muted-foreground'>
-              These are the reassessments started from this browser. They are
-              remembered on this device only, so a colleague&apos;s list looks
+              Remembered on this device only, so a colleague&apos;s list looks
               different from yours.
             </p>
 

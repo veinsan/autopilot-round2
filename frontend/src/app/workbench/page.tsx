@@ -68,15 +68,19 @@ const statusLabels: Record<CaseStatus, string> = {
 }
 
 /**
- * Priority is the one thing that decides what to pick up first, so each level
- * gets its own tone. The word itself is always printed, so nothing here is
- * carried by color alone.
+ * Priority decides what to pick up first, so the ladder is drawn by weight
+ * rather than by hue: solid, then tinted, then quiet. Measured as four tinted
+ * hues, critical and high sat 2.9 apart for a red-green colourblind reader —
+ * far too close for the one distinction that matters. The word is printed
+ * either way, so nothing is carried by colour alone.
  */
 const priorityStyles: Record<string, string> = {
-  critical: 'border-red-200 bg-red-50 text-red-800',
-  high: 'border-amber-200 bg-amber-50 text-amber-800',
-  medium: 'border-blue-200 bg-blue-50 text-blue-800',
-  low: 'border-slate-200 bg-slate-100 text-slate-700',
+  critical: 'border-transparent bg-destructive text-white',
+  high: 'border-amber-300 bg-amber-100 text-amber-900',
+  medium: 'border-blue-200 bg-blue-50 text-blue-900',
+  // Muted-on-muted measured 4.2:1, under the 4.5:1 that this size of text
+  // needs, so the quiet step still carries a readable ink.
+  low: 'border-border bg-muted text-slate-700',
 }
 
 // Worded as the outcome the reviewer is recording, not as the code stored

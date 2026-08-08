@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { InsightNote } from '@/components/insights/InsightNote'
-import { ShareBar } from '@/components/insights/ShareBar'
+import { MagnitudeBars } from '@/components/charts/MagnitudeBars'
 import {
   clearSentence,
   cohortOutcome,
@@ -75,9 +75,8 @@ export function CohortBottlenecksPanel({
           Shared blockers by group
         </CardTitle>
         <CardDescription>
-          Which team is holding up a whole group of new joiners on their Day-1
-          dependencies. Individual people are never named here, and results are
-          only reported for groups large enough to stay anonymous.
+          Which team is holding up a whole group of new joiners. Nobody is named
+          here, and a group too small to stay anonymous is not reported on.
         </CardDescription>
       </CardHeader>
 
@@ -122,9 +121,8 @@ export function CohortBottlenecksPanel({
                 id='cohort-filter-hint'
                 className='text-xs text-muted-foreground'
               >
-                Type the onboarding group exactly as HR records it, or leave it
-                empty to look at {cohortPopulation(roles, null)} together. This
-                choice changes this section only.
+                Leave it empty to see {cohortPopulation(roles, null)} together.
+                This changes this section only.
               </p>
             </div>
             <div className='flex gap-2'>
@@ -263,66 +261,34 @@ export function CohortBottlenecksPanel({
 
           {data && outcome === 'findings' && (
             <div className='space-y-4'>
-              <p className='text-sm text-muted-foreground'>
-                {findingsSentence(data)}
+              {/* The worst team, said in one line, before the chart repeats it
+                  with the rest. */}
+              <p className='text-sm font-medium text-brand-navy'>
+                {ranked[0].dependency_team} is holding up{' '}
+                {ranked[0].affected_workers.toLocaleString()} of{' '}
+                {data.denominator.toLocaleString()} people in {population}.
               </p>
-              <div className='overflow-x-auto rounded-xl border border-border/70'>
-                <table className='w-full text-left text-sm'>
-                  <caption className='sr-only'>
-                    Teams holding up {population}, largest first
-                  </caption>
-                  <thead className='border-b border-border/70 bg-muted/40'>
-                    <tr>
-                      <th scope='col' className='px-4 py-3 font-medium'>
-                        Team
-                      </th>
-                      <th scope='col' className='px-4 py-3 font-medium'>
-                        People held up
-                      </th>
-                      <th scope='col' className='px-4 py-3 font-medium'>
-                        Share of the group
-                      </th>
-                      <th scope='col' className='px-4 py-3 font-medium'>
-                        Recommended next step
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className='divide-y divide-border/60'>
-                    {ranked.map((item) => (
-                      <tr key={item.dependency_team} className='align-top'>
-                        <th
-                          scope='row'
-                          className='px-4 py-3 text-left font-medium text-brand-navy'
-                        >
-                          {item.dependency_team}
-                        </th>
-                        <td className='whitespace-nowrap px-4 py-3 tabular-nums text-muted-foreground'>
-                          {item.affected_workers.toLocaleString()} of{' '}
-                          {data.denominator.toLocaleString()}
-                        </td>
-                        <td className='px-4 py-3'>
-                          <p className='tabular-nums text-brand-navy'>
-                            {item.affected_percent}%
-                          </p>
-                          <ShareBar
-                            percent={item.affected_percent}
-                            tone='warning'
-                            className='mt-1.5 min-w-[6rem]'
-                          />
-                        </td>
-                        <td className='px-4 py-3 text-muted-foreground'>
-                          {item.recommended_action}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {thresholdSentence(data) && (
-                <p className='text-xs text-muted-foreground'>
-                  {thresholdSentence(data)}
-                </p>
-              )}
+              <MagnitudeBars
+                tone='warning'
+                caption='Share of the group each team is holding up, largest first.'
+                items={ranked.map((item) => ({
+                  key: item.dependency_team,
+                  label: item.dependency_team,
+                  value: `${item.affected_workers.toLocaleString()} of ${data.denominator.toLocaleString()} · ${item.affected_percent}%`,
+                  share: item.affected_percent,
+                  note: item.recommended_action,
+                }))}
+              />
+              <details className='group'>
+                <summary className='inline-flex cursor-pointer list-none items-center gap-1 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden'>
+                  <Icons.chevronRight className='h-3 w-3 transition-transform group-open:rotate-90' />
+                  How this is worked out
+                </summary>
+                <div className='mt-2 space-y-1 text-xs text-muted-foreground'>
+                  <p>{findingsSentence(data)}</p>
+                  {thresholdSentence(data) && <p>{thresholdSentence(data)}</p>}
+                </div>
+              </details>
             </div>
           )}
         </div>

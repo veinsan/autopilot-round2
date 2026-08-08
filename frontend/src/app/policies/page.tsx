@@ -545,6 +545,14 @@ export default function PolicyStudioPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [simulation, setSimulation] = useState<SimulationResult | null>(null)
+  /** What the result on screen was measured against. */
+  const [simulationScope, setSimulationScope] = useState<{
+    asOf: string
+    cohort: string
+  } | null>(null)
+  const [testTarget, setTestTarget] = useState<Policy | null>(null)
+  const [testDate, setTestDate] = useState('')
+  const [testCohort, setTestCohort] = useState('')
   const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null)
   const [detailSnapshot, setDetailSnapshot] = useState('')
   const [detailSummary, setDetailSummary] = useState('')
@@ -814,24 +822,50 @@ export default function PolicyStudioPage() {
     }
   }
 
-  const advance = async (policy: Policy) => {
+  /**
+   * A test can be run against a date other than today, which is how you see
+   * what a change would do at the next intake rather than at this moment.
+   */
+  const runTest = async (policy: Policy, on: string, group: string) => {
     setBusy(policy.version_id)
     try {
-      if (policy.status === 'draft') {
-        const result = await apiClient<{ result: SimulationResult }>(
-          '/api/hr/policies/simulations',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ version_id: policy.version_id }),
-          }
-        )
-        setSimulation(result.result)
-        setMessage(
-          `Test finished. ${result.result.workers_evaluated} people were checked. No cases were opened and nobody was contacted.`
-        )
-        window.setTimeout(() => simulationRef.current?.focus(), 0)
-      } else if (policy.status === 'simulated') {
+      const result = await apiClient<{
+        as_of: string
+        result: SimulationResult
+      }>('/api/hr/policies/simulations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          version_id: policy.version_id,
+          as_of: on ? new Date(`${on}T00:00:00Z`).toISOString() : undefined,
+          cohort: group.trim() || undefined,
+        }),
+      })
+      setSimulation(result.result)
+      setSimulationScope({ asOf: result.as_of ?? on, cohort: group.trim() })
+      setTestTarget(null)
+      setMessage(
+        `Test finished. ${result.result.workers_evaluated} people were checked. No cases were opened and nobody was contacted.`
+      )
+      window.setTimeout(() => simulationRef.current?.focus(), 0)
+      await load()
+    } catch (error) {
+      setProblem(
+        error instanceof Error ? error.message : 'The test did not run.'
+      )
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const advance = async (policy: Policy) => {
+    if (policy.status === 'draft') {
+      setTestTarget(policy)
+      return
+    }
+    setBusy(policy.version_id)
+    try {
+      if (policy.status === 'simulated') {
         const result = await apiClient<{ status: string }>(
           `/api/hr/policies/${policy.version_id}/approvals`,
           {
@@ -1311,6 +1345,17 @@ export default function PolicyStudioPage() {
                       : 'no policy in force yet'}
                     .
                   </p>
+                  {simulationScope && (
+                    <p className='text-xs text-muted-foreground'>
+                      Measured as if the date were{' '}
+                      <span className='font-medium text-foreground'>
+                        {new Date(simulationScope.asOf).toLocaleDateString()}
+                      </span>
+                      {simulationScope.cohort
+                        ? `, for the ${simulationScope.cohort} group only.`
+                        : ', across everyone.'}
+                    </p>
+                  )}
                   {Object.keys(simulation.delta_by_code).length === 0 ? (
                     <p className='text-sm'>
                       Nothing would change for the people checked.
@@ -1358,6 +1403,82 @@ export default function PolicyStudioPage() {
             )}
           </div>
         </div>
+
+        <Dialog
+          open={testTarget !== null}
+          onOpenChange={(open) => {
+            if (!open && busy === null) setTestTarget(null)
+            if (open) {
+              setTestDate('')
+              setTestCohort('')
+            }
+          }}
+        >
+          <DialogContent className='max-w-lg'>
+            <DialogHeader>
+              <DialogTitle>Test this draft</DialogTitle>
+              <DialogDescription>
+                The draft is run against real people and compared with the
+                policy in force. No cases are opened and nobody is contacted.
+              </DialogDescription>
+            </DialogHeader>
+            <div className='space-y-4'>
+              <div className='space-y-1'>
+                <Label htmlFor='test-as-of'>Run it as if the date were</Label>
+                <Input
+                  id='test-as-of'
+                  type='date'
+                  className='w-52'
+                  value={testDate}
+                  disabled={busy !== null}
+                  onChange={(event) => setTestDate(event.target.value)}
+                  aria-describedby='test-as-of-hint'
+                />
+                <p id='test-as-of-hint' className='text-xs text-muted-foreground'>
+                  Leave it empty for today. Pick a future date to see what the
+                  change would do at the next intake — deadlines are measured
+                  from the date you choose.
+                </p>
+              </div>
+              <div className='space-y-1'>
+                <Label htmlFor='test-cohort'>
+                  Limit it to one group{' '}
+                  <span className='font-normal text-muted-foreground'>
+                    (optional)
+                  </span>
+                </Label>
+                <Input
+                  id='test-cohort'
+                  value={testCohort}
+                  autoComplete='off'
+                  placeholder='All groups'
+                  disabled={busy !== null}
+                  onChange={(event) => setTestCohort(event.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter className='gap-2 sm:space-x-0'>
+              <Button
+                type='button'
+                variant='outline'
+                disabled={busy !== null}
+                onClick={() => setTestTarget(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type='button'
+                variant='gradient'
+                loading={busy === testTarget?.version_id}
+                onClick={() =>
+                  testTarget && void runTest(testTarget, testDate, testCohort)
+                }
+              >
+                Run the test
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={draftEditorOpen} onOpenChange={setDraftEditorOpen}>
           <DialogContent className='max-h-[calc(100dvh-10rem)] max-w-3xl overflow-y-auto'>

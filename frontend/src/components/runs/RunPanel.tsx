@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Icons } from '@/components/ui/icons'
+import { MagnitudeBars } from '@/components/charts/MagnitudeBars'
+import { cn } from '@/lib/utils'
 import type { StreamState } from '@/hooks/useRunStream'
 import {
   PHASE_BADGE,
@@ -114,6 +116,12 @@ export function RunPanel({
   }, [copied])
 
   const elapsed = formatElapsed(run.created_at, now)
+  // The bars are drawn against the most common finding, so the tallest is full
+  // width and the rest are read against it.
+  const mostCommonFinding = Math.max(
+    1,
+    ...summary.findings.map((finding) => finding.count)
+  )
   const live = liveSentence(streamState, terminal)
   const stopsSoon = phase === 'stopping'
 
@@ -222,35 +230,49 @@ export function RunPanel({
 
         {resynchronised && (
           <p className='text-xs text-muted-foreground'>
-            The progress list was rebuilt from the full record of this
-            reassessment, so nothing is missing from it.
+            Progress was rebuilt from the full record, so nothing is missing.
           </p>
         )}
 
-        <ol className='space-y-3'>
-          {summary.stages.map((stage) => (
-            <li key={stage.key} className='flex gap-3'>
-              <StageMarker state={stage.state} />
-              <div className='min-w-0'>
-                <p
-                  className={
+        {/* The four steps as one line of travel, so how far it has got is
+            readable at a glance rather than counted down a list. */}
+        <ol className='flex items-start'>
+          {summary.stages.map((stage, index) => (
+            <li
+              key={stage.key}
+              className='relative flex min-w-0 flex-1 flex-col items-center text-center'
+            >
+              {index > 0 && (
+                <span
+                  aria-hidden='true'
+                  className={cn(
+                    'absolute left-0 top-2.5 h-0.5 w-1/2 -translate-x-1/2',
                     stage.state === 'pending' || stage.state === 'stopped'
-                      ? 'text-sm text-muted-foreground'
-                      : 'text-sm font-medium text-foreground'
-                  }
-                >
-                  {stage.label}
-                  <span className='sr-only'>
-                    {' '}
-                    — {STAGE_STATE_WORDING[stage.state]}
-                  </span>
-                </p>
-                {stage.detail && (
-                  <p className='mt-0.5 text-xs text-muted-foreground'>
-                    {stage.detail}
-                  </p>
+                      ? 'bg-border'
+                      : 'bg-brand-cornflower'
+                  )}
+                />
+              )}
+              <StageMarker state={stage.state} />
+              <p
+                className={cn(
+                  'mt-1.5 px-1 text-xs',
+                  stage.state === 'pending' || stage.state === 'stopped'
+                    ? 'text-muted-foreground'
+                    : 'font-medium text-foreground'
                 )}
-              </div>
+              >
+                {stage.label}
+                <span className='sr-only'>
+                  {' '}
+                  — {STAGE_STATE_WORDING[stage.state]}
+                </span>
+              </p>
+              {stage.detail && (
+                <p className='px-1 text-[11px] text-muted-foreground'>
+                  {stage.detail}
+                </p>
+              )}
             </li>
           ))}
         </ol>
@@ -282,19 +304,15 @@ export function RunPanel({
               What this reassessment found
             </h4>
             {summary.findings.length > 0 ? (
-              <ul className='space-y-1.5'>
-                {summary.findings.map((finding) => (
-                  <li
-                    key={finding.code}
-                    className='flex items-start justify-between gap-3 text-sm'
-                  >
-                    <span className='text-foreground'>{finding.label}</span>
-                    <span className='shrink-0 text-muted-foreground'>
-                      {finding.count === 1 ? 'once' : `${finding.count} times`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <MagnitudeBars
+                items={summary.findings.map((finding) => ({
+                  key: finding.code,
+                  label: finding.label,
+                  value:
+                    finding.count === 1 ? 'once' : `${finding.count} times`,
+                  share: (finding.count / mostCommonFinding) * 100,
+                }))}
+              />
             ) : null}
             {summary.casesTouched > 0 && (
               <div className='flex flex-wrap items-center gap-3'>

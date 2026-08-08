@@ -182,9 +182,8 @@ export function StartReassessmentDialog({
                 id={`${fieldId}-employee-hint`}
                 className='text-xs text-muted-foreground'
               >
-                Enter the ID exactly as it appears in the HR records, in the
-                form EMP7032. Anyone can be reassessed, whether or not they
-                already have a case open.
+                Exactly as it appears in the HR records. Anyone can be
+                reassessed, with or without an open case.
               </p>
             </div>
           ) : (
@@ -208,8 +207,7 @@ export function StartReassessmentDialog({
                 id={`${fieldId}-cohort-hint`}
                 className='text-xs text-muted-foreground'
               >
-                Enter the cohort name exactly as it appears in the HR records.
-                Every person in it is reassessed.
+                Exactly as HR records it. Everyone in the group is reassessed.
               </p>
             </div>
           )}

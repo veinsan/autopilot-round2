@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Icons } from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
 import { CaseMetricsPanel } from '@/components/insights/CaseMetricsPanel'
+import { HeadlinePanel } from '@/components/insights/HeadlinePanel'
 import { CohortBottlenecksPanel } from '@/components/insights/CohortBottlenecksPanel'
 import { InsightNote } from '@/components/insights/InsightNote'
 import {
@@ -181,9 +182,11 @@ export default function InsightsPage() {
     void loadTwin(cohort, true)
   }, [loadTwin, cohort])
 
+  // The case list is what the headline counts, so it is fetched on arrival
+  // rather than only when the grid is opened.
   useEffect(() => {
-    if (view === 'matrix') void loadQueue()
-  }, [loadQueue, view])
+    void loadQueue()
+  }, [loadQueue])
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -192,10 +195,10 @@ export default function InsightsPage() {
     await Promise.allSettled([
       loadCaseMetrics(),
       loadTwin(cohort, false),
-      view === 'matrix' ? loadQueue() : Promise.resolve(),
+      loadQueue(),
     ])
     setRefreshing(false)
-  }, [cohort, loadCaseMetrics, loadQueue, loadTwin, view])
+  }, [cohort, loadCaseMetrics, loadQueue, loadTwin])
 
   return (
     <div className='space-y-6'>
@@ -208,10 +211,7 @@ export default function InsightsPage() {
             Insights
           </h1>
           <p className='mt-2 max-w-2xl text-muted-foreground'>
-            How much onboarding work is open right now, and which team is
-            holding up a whole group of new joiners. Both are measured against
-            the policy in force, so every figure can be traced back to the rules
-            behind it.
+            What is open right now, and what is holding people up.
           </p>
         </div>
         {(!sessionReady || hasAnyAccess) && (
@@ -251,6 +251,13 @@ export default function InsightsPage() {
         </Card>
       ) : (
         <>
+          <HeadlinePanel
+            metrics={caseMetrics}
+            queue={queue}
+            queueFetchedAt={queueFetchedAt}
+            roles={roles}
+          />
+
           <section aria-labelledby='case-load-heading' className='space-y-3'>
             <div className='flex flex-wrap items-center justify-between gap-3'>
               <h2

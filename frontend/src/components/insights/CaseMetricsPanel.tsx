@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import type { ComponentType, ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -14,14 +13,13 @@ import { Icons } from '@/components/ui/icons'
 import { Skeleton } from '@/components/ui/skeleton'
 import { InsightNote } from '@/components/insights/InsightNote'
 import { CasePriorityMatrix } from '@/components/insights/CasePriorityMatrix'
-import { ShareBar } from '@/components/insights/ShareBar'
+import { MagnitudeBars } from '@/components/charts/MagnitudeBars'
 import {
   caseMetricsPopulation,
   caseMetricsProvenanceHint,
   caseMetricsScopeSentence,
   caseTypeBreakdown,
   formatMoment,
-  openShare,
   type CaseMetrics,
   type InsightsView,
   type Loadable,
@@ -32,42 +30,6 @@ const VISIBLE_TYPES = 5
 
 function plural(count: number, one: string, many: string): string {
   return count === 1 ? one : many
-}
-
-function Tile({
-  label,
-  icon: Icon,
-  value,
-  hint,
-}: {
-  label: string
-  icon: ComponentType<{ className?: string }>
-  /** `null` while loading, so the tile keeps its height either way. */
-  value: string | null
-  hint: ReactNode
-}) {
-  return (
-    <Card>
-      <CardContent className='p-5'>
-        <div className='flex items-start justify-between gap-3'>
-          <p className='text-sm text-muted-foreground'>{label}</p>
-          <Icon className='h-5 w-5 shrink-0 text-brand-cornflower' />
-        </div>
-        <div className='mt-2 flex h-10 items-center'>
-          {value === null ? (
-            <Skeleton className='h-8 w-24' />
-          ) : (
-            /* Proportional figures: a standalone value does not align with
-               anything, and equal-width digits read loose at this size. */
-            <p className='text-3xl font-bold text-brand-navy'>{value}</p>
-          )}
-        </div>
-        <div className='mt-1 min-h-[2.5rem] text-xs text-muted-foreground'>
-          {value === null ? <Skeleton className='h-3 w-40' /> : hint}
-        </div>
-      </CardContent>
-    </Card>
-  )
 }
 
 export function CaseMetricsPanel({
@@ -93,7 +55,6 @@ export function CaseMetricsPanel({
   const data = state.status === 'ready' ? state.data : null
   const breakdown = useMemo(() => (data ? caseTypeBreakdown(data) : []), [data])
   const population = caseMetricsPopulation(roles)
-  const share = data ? openShare(data) : null
   const visible = showAllTypes ? breakdown : breakdown.slice(0, VISIBLE_TYPES)
   const hiddenCount = breakdown.length - visible.length
 
@@ -153,54 +114,6 @@ export function CaseMetricsPanel({
 
       {loadingOrReady && (
         <>
-          <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-3'>
-            <Tile
-              label='Open cases'
-              icon={Icons.workbench}
-              value={data ? data.open_case_count.toLocaleString() : null}
-              hint={
-                data && data.denominator > 0 ? (
-                  <>
-                    of {data.denominator.toLocaleString()}{' '}
-                    {plural(data.denominator, 'case', 'cases')} on record for{' '}
-                    {population}
-                  </>
-                ) : (
-                  <>No cases have been recorded for {population} yet.</>
-                )
-              }
-            />
-            <Tile
-              label='Still open'
-              icon={Icons.trendingUp}
-              value={
-                data ? (share === null ? '—' : `${Math.round(share)}%`) : null
-              }
-              hint={
-                share === null ? (
-                  <>There is nothing on record to compare against yet.</>
-                ) : (
-                  <>of every case ever recorded for {population}</>
-                )
-              }
-            />
-            <Tile
-              label='Areas with open work'
-              icon={Icons.layers}
-              value={data ? String(breakdown.length) : null}
-              hint={
-                breakdown.length > 0 ? (
-                  <>
-                    Most open work sits in {breakdown[0].label} (
-                    {breakdown[0].count.toLocaleString()}).
-                  </>
-                ) : (
-                  <>No kind of case has open work right now.</>
-                )
-              }
-            />
-          </div>
-
           <Card>
             <CardHeader>
               <CardTitle className='flex items-center gap-2 text-lg'>
@@ -274,22 +187,16 @@ export function CaseMetricsPanel({
 
                   {data && data.open_case_count > 0 && (
                     <>
-                      <ul id='case-type-breakdown' className='space-y-3'>
-                        {visible.map((item) => (
-                          <li key={item.key} className='space-y-1.5'>
-                            <div className='flex items-baseline justify-between gap-3 text-sm'>
-                              <span className='truncate font-medium text-brand-navy'>
-                                {item.label}
-                              </span>
-                              <span className='shrink-0 tabular-nums text-muted-foreground'>
-                                {item.count.toLocaleString()} open ·{' '}
-                                {Math.round(item.percent)}%
-                              </span>
-                            </div>
-                            <ShareBar percent={item.percent} />
-                          </li>
-                        ))}
-                      </ul>
+                      <div id='case-type-breakdown'>
+                        <MagnitudeBars
+                          items={visible.map((item) => ({
+                            key: item.key,
+                            label: item.label,
+                            value: `${item.count.toLocaleString()} · ${Math.round(item.percent)}%`,
+                            share: item.percent,
+                          }))}
+                        />
+                      </div>
                       {breakdown.length > VISIBLE_TYPES && (
                         <Button
                           size='sm'
