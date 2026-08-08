@@ -1,0 +1,4 @@
+interface:
+  display_name: "Auto Studio Ops"
+  short_description: "Auto Studio debugging, build, and live-test guardrails"
+  default_prompt: "Use $auto-studio-ops before debugging, reviewing, or building an Auto Studio workflow, or designing a live test."
