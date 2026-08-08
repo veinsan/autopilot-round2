@@ -294,15 +294,15 @@ export default function ReassessmentRunsPage() {
     <div className='space-y-6'>
       <div className='flex flex-col justify-between gap-4 sm:flex-row sm:items-end'>
         <div>
-          <p className='text-sm font-medium text-brand-cornflower'>
-            Governed orchestration
+          <p className='text-sm font-medium text-brand-purple'>
+            Checks on demand
           </p>
           <h1 className='text-display-3 font-bold tracking-tight text-brand-navy'>
             Reassessments
           </h1>
-          <p className='mt-2 text-muted-foreground'>
-            Run the onboarding and retention checks again for one employee or
-            one cohort, watch them progress, and see what they found.
+          <p className='mt-2 max-w-2xl text-muted-foreground'>
+            Run the onboarding and retention checks again for one employee or a
+            whole starting group, watch them progress, and see what they found.
           </p>
         </div>
         {mayStartRun && (
@@ -388,7 +388,9 @@ export default function ReassessmentRunsPage() {
             )}
           </div>
 
-          <div className='space-y-3'>
+          {/* The list stays in view on a desktop while the panel beside it
+              grows with events. */}
+          <div className='space-y-3 xl:sticky xl:top-24 xl:self-start'>
             <div className='flex flex-wrap items-center justify-between gap-2'>
               <h2 className='text-lg font-semibold text-brand-navy'>
                 Recent reassessments
@@ -398,6 +400,7 @@ export default function ReassessmentRunsPage() {
                 variant='ghost'
                 onClick={() => setLookupOpen((current) => !current)}
                 aria-expanded={lookupOpen}
+                aria-controls='run-reference-lookup'
               >
                 <Icons.search className='h-4 w-4' />
                 Open by reference
@@ -411,7 +414,7 @@ export default function ReassessmentRunsPage() {
             </p>
 
             {lookupOpen && (
-              <Card>
+              <Card id='run-reference-lookup'>
                 <CardContent className='space-y-2 p-4'>
                   <Label htmlFor='run-reference'>
                     Reference from another device
@@ -510,7 +513,7 @@ export default function ReassessmentRunsPage() {
                           </span>
                         </span>
                         {record && !isTerminalPhase(phase) && !isSelected && (
-                          <span className='mt-2 block text-xs text-brand-cornflower'>
+                          <span className='mt-2 block text-xs text-brand-purple'>
                             Still going — open it to follow along.
                           </span>
                         )}

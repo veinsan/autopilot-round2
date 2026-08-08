@@ -201,17 +201,17 @@ export default function InsightsPage() {
     <div className='space-y-6'>
       <div className='flex flex-col justify-between gap-4 sm:flex-row sm:items-end'>
         <div>
-          <p className='text-sm font-medium text-brand-cornflower'>
-            Governed measurement
+          <p className='text-sm font-medium text-brand-purple'>
+            Where the work stands
           </p>
           <h1 className='text-display-3 font-bold tracking-tight text-brand-navy'>
             Insights
           </h1>
           <p className='mt-2 max-w-2xl text-muted-foreground'>
-            How much onboarding work is open right now, and which shared
-            dependency is holding up a whole group. Both are measured against
-            the policy version in force, so every figure can be traced back to
-            the rules that produced it.
+            How much onboarding work is open right now, and which team is
+            holding up a whole group of new joiners. Both are measured against
+            the policy in force, so every figure can be traced back to the rules
+            behind it.
           </p>
         </div>
         {(!sessionReady || hasAnyAccess) && (
@@ -300,15 +300,14 @@ export default function InsightsPage() {
               id='cohort-heading'
               className='text-lg font-semibold text-brand-navy'
             >
-              Cohort bottlenecks
+              Where groups are held up
             </h2>
             {view === 'matrix' && (
-              <p className='text-sm text-muted-foreground'>
-                Shared blockers are not on the grid. The analysis reports how
-                many people a team is holding up, but records nothing about how
-                long it has been holding them up, so there is no honest way to
-                place a team on a time axis. It keeps its own presentation
-                below, unchanged.
+              <p className='max-w-3xl text-sm text-muted-foreground'>
+                Shared blockers are not on the grid above. We know how many
+                people a team is holding up, but not for how long, so placing a
+                team on a time axis would be a guess. This section keeps its own
+                view below.
               </p>
             )}
             <CohortBottlenecksPanel

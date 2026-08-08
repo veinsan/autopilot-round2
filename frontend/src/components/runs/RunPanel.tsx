@@ -143,9 +143,11 @@ export function RunPanel({
                 </span>
               )}
             </div>
-            <h2 className='mt-2 truncate text-lg font-semibold text-brand-navy'>
+            {/* Sits under the page's "Live progress" heading, so it is the
+                level below it. */}
+            <h3 className='mt-2 truncate text-lg font-semibold text-brand-navy'>
               Reassessment of {runSubject(run).toLowerCase()}
-            </h2>
+            </h3>
             <p className='mt-1 text-sm text-muted-foreground'>
               Requested {formatTimestamp(run.created_at)}
               {run.requested_reason
@@ -196,7 +198,12 @@ export function RunPanel({
           {/* The ticking timer is hidden from assistive technology so the live
               region announces status changes, not every passing second. */}
           {!terminal && elapsed ? (
-            <span aria-hidden='true' className='text-muted-foreground'>
+            /* Equal-width digits: this value changes every second and would
+               otherwise nudge the sentence around it. */
+            <span
+              aria-hidden='true'
+              className='tabular-nums text-muted-foreground'
+            >
               {' '}
               Running for {elapsed}.
             </span>
@@ -261,16 +268,19 @@ export function RunPanel({
         )}
 
         {actionMessage && (
-          <div className='rounded-lg border border-brand-cornflower/30 p-3 text-sm text-muted-foreground'>
+          <div
+            role='status'
+            className='rounded-lg border border-brand-cornflower/30 p-3 text-sm text-muted-foreground'
+          >
             {actionMessage}
           </div>
         )}
 
         {(summary.findings.length > 0 || summary.casesTouched > 0) && (
           <div className='space-y-3 border-t border-border/60 pt-4'>
-            <h3 className='text-sm font-semibold text-brand-navy'>
+            <h4 className='text-sm font-semibold text-brand-navy'>
               What this reassessment found
-            </h3>
+            </h4>
             {summary.findings.length > 0 ? (
               <ul className='space-y-1.5'>
                 {summary.findings.map((finding) => (

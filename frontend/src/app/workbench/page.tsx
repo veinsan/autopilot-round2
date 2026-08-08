@@ -1,11 +1,14 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import apiClient from '@/lib/api-client'
+import { reasonCodeLabel } from '@/lib/runs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Icons } from '@/components/ui/icons'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select,
   SelectContent,
@@ -64,34 +67,67 @@ const statusLabels: Record<CaseStatus, string> = {
   resolved: 'Resolved',
 }
 
+/**
+ * Priority is the one thing that decides what to pick up first, so each level
+ * gets its own tone. The word itself is always printed, so nothing here is
+ * carried by color alone.
+ */
+const priorityStyles: Record<string, string> = {
+  critical: 'border-red-200 bg-red-50 text-red-800',
+  high: 'border-amber-200 bg-amber-50 text-amber-800',
+  medium: 'border-blue-200 bg-blue-50 text-blue-800',
+  low: 'border-slate-200 bg-slate-100 text-slate-700',
+}
+
+// Worded as the outcome the reviewer is recording, not as the code stored
+// behind it. The stored values are unchanged.
 const resolutionOptions: { value: ResolutionCode; label: string }[] = [
-  { value: 'DATA_CORRECTED', label: 'Source data corrected' },
-  { value: 'EMPLOYEE_SUPPORTED', label: 'Employee support completed' },
-  { value: 'DEPENDENCY_CLEARED', label: 'Dependency cleared' },
+  { value: 'DATA_CORRECTED', label: 'The records were corrected' },
+  { value: 'EMPLOYEE_SUPPORTED', label: 'The employee was helped' },
+  { value: 'DEPENDENCY_CLEARED', label: 'The blocker was cleared' },
   {
     value: 'POLICY_EXCEPTION_APPROVED',
-    label: 'Policy exception approved',
+    label: 'An exception was approved',
   },
-  { value: 'NO_ACTION_REQUIRED', label: 'No action required' },
-  { value: 'ESCALATED_EXTERNALLY', label: 'Escalated externally' },
+  { value: 'NO_ACTION_REQUIRED', label: 'No action was needed' },
+  { value: 'ESCALATED_EXTERNALLY', label: 'Another team took it on' },
 ]
 
 const safeContextLabels: Record<string, string> = {
-  reason_code: 'Reason code',
-  domain: 'Domain',
-  severity: 'Severity',
-  policy_version_id: 'Policy version',
-  evaluated_at: 'Evaluated at',
+  reason_code: 'Why it was raised',
+  domain: 'Area',
+  severity: 'How serious',
+  policy_version_id: 'Policy in force',
+  evaluated_at: 'Checked on',
   owner: 'Owner',
-  recommended_action: 'Recommendation',
+  recommended_action: 'Suggested next step',
+}
+
+/** Values that are stored as codes and must be read as sentences. */
+function contextValue(
+  key: string,
+  value: string | number | boolean | null
+): string {
+  if (value === null) return 'Not recorded'
+  if (key === 'reason_code') return reasonCodeLabel(String(value))
+  if (key === 'evaluated_at') {
+    const parsed = new Date(String(value))
+    return Number.isNaN(parsed.getTime())
+      ? String(value)
+      : parsed.toLocaleString()
+  }
+  if (key === 'domain' || key === 'severity') {
+    return String(value).replaceAll('_', ' ')
+  }
+  return String(value)
 }
 
 function ManagerState({ state }: { state: ManagerActionState }) {
   const steps = [
-    { key: 'nudge_created', label: 'Nudge created' },
-    { key: 'delivered', label: 'Delivered' },
-    { key: 'acknowledged', label: 'Acknowledged' },
-    { key: 'action_verified', label: 'Action verified' },
+    { key: 'nudge_created', label: 'Reminder raised' },
+    { key: 'delivered', label: 'Sent to manager' },
+    { key: 'acknowledged', label: 'Manager replied' },
+    { key: 'action_verified', label: 'Action confirmed' },
   ] as const
   const current = steps.findIndex((step) => step.key === state.current_state)
 
@@ -113,7 +149,9 @@ function ManagerState({ state }: { state: ManagerActionState }) {
               {step.label}
             </span>
             {index < steps.length - 1 && (
-              <span className='text-xs text-muted-foreground'>→</span>
+              <span aria-hidden='true' className='text-xs text-muted-foreground'>
+                →
+              </span>
             )}
           </div>
         ))}
@@ -124,12 +162,12 @@ function ManagerState({ state }: { state: ManagerActionState }) {
         )}
       </div>
       <p className='text-xs text-muted-foreground'>
-        Successful reminders: {state.successful_reminder_count}
+        Reminders sent: {state.successful_reminder_count}
         {state.acknowledgment_deadline
-          ? ` · Acknowledgment deadline ${new Date(state.acknowledgment_deadline).toLocaleString('en-GB')}`
+          ? ` · Reply due ${new Date(state.acknowledgment_deadline).toLocaleString()}`
           : ''}
         {state.action_deadline
-          ? ` · Action deadline ${new Date(state.action_deadline).toLocaleString('en-GB')}`
+          ? ` · Action due ${new Date(state.action_deadline).toLocaleString()}`
           : ''}
       </p>
     </div>
@@ -154,10 +192,23 @@ export default function WorkbenchPage() {
     Record<string, ManagerActionState>
   >({})
   const [error, setError] = useState<string | null>(null)
+  // A failure that belongs to one case is reported on that case, not at the
+  // top of a queue the reader may have scrolled far past.
+  const [caseErrors, setCaseErrors] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [resolutionCodes, setResolutionCodes] = useState<
     Record<string, ResolutionCode>
   >({})
+
+  const setCaseError = (caseId: string, message: string | null) => {
+    setCaseErrors((current) => {
+      const next = { ...current }
+      if (message) next[caseId] = message
+      else delete next[caseId]
+      return next
+    })
+  }
 
   const load = useCallback(async () => {
     try {
@@ -182,6 +233,8 @@ export default function WorkbenchPage() {
           ? loadError.message
           : 'The Workbench could not be loaded.'
       )
+    } finally {
+      setLoading(false)
     }
   }, [mayViewManagerActions])
 
@@ -199,9 +252,15 @@ export default function WorkbenchPage() {
   const action = async (item: Case, decision: Decision) => {
     const resolutionCode = resolutionCodes[item.case_id]
     if (decision === 'resolve' && !resolutionCode) {
-      setError('Select a resolution code before resolving the case.')
+      // Reported on the case itself, beside the control that needs filling in.
+      setCaseError(
+        item.case_id,
+        'Choose how this case was resolved before resolving it.'
+      )
+      document.getElementById(`resolution-${item.case_id}`)?.focus()
       return
     }
+    setCaseError(item.case_id, null)
     setBusy(item.case_id)
     try {
       await apiClient(`/api/hr/cases/${item.case_id}/actions`, {
@@ -214,10 +273,11 @@ export default function WorkbenchPage() {
       })
       await load()
     } catch (actionError) {
-      setError(
+      setCaseError(
+        item.case_id,
         actionError instanceof Error
           ? actionError.message
-          : 'The action failed.'
+          : 'This action could not be completed. Try again.'
       )
     } finally {
       setBusy(null)
@@ -243,12 +303,13 @@ export default function WorkbenchPage() {
         }
       )
       setManagerStates((current) => ({ ...current, [state.case_id]: updated }))
-      setError(null)
+      setCaseError(state.case_id, null)
     } catch (actionError) {
-      setError(
+      setCaseError(
+        state.case_id,
         actionError instanceof Error
           ? actionError.message
-          : 'The manager action state could not be updated.'
+          : 'The manager action state could not be updated. Try again.'
       )
     } finally {
       setBusy(null)
@@ -258,43 +319,80 @@ export default function WorkbenchPage() {
   return (
     <div className='space-y-6'>
       <div>
-        <p className='text-sm font-medium text-brand-cornflower'>
-          Human-in-the-loop
+        {/* Cornflower measures 2.4:1 on this background, so the eyebrow uses
+            the deeper brand purple (5.65:1). */}
+        <p className='text-sm font-medium text-brand-purple'>
+          Onboarding &amp; retention
         </p>
         <h1 className='text-display-3 font-bold tracking-tight text-brand-navy'>
           HR Workbench
         </h1>
-        <p className='mt-2 text-muted-foreground'>
-          Cases are closed only by a human after review. A recurring signal can
-          reopen the related domain case.
+        <p className='mt-2 max-w-2xl text-muted-foreground'>
+          Nothing here closes on its own. You decide what happens to each case,
+          and if the same problem comes back the case opens again.
         </p>
       </div>
 
-      {isManagerOnly && (
-        <Card className='border-brand-cornflower/30'>
-          <CardContent className='p-4 text-sm text-muted-foreground'>
-            The backend limits the manager view to direct reports. Payroll and
-            confidential cases are not shown in this queue.
-          </CardContent>
-        </Card>
-      )}
-      {hiddenPayrollCount > 0 && (
-        <Card className='border-amber-300/50'>
-          <CardContent className='p-4 text-sm text-amber-800'>
-            {hiddenPayrollCount} payroll case(s) are restricted to payroll
-            reviewers or Admins.
-          </CardContent>
-        </Card>
+      {/* Scope notes are context, not alarms: one quiet line above the queue
+          rather than two full cards pushing the work off the screen. */}
+      {(isManagerOnly || hiddenPayrollCount > 0) && (
+        <div className='flex items-start gap-2 text-sm text-muted-foreground'>
+          <Icons.info className='mt-0.5 h-4 w-4 shrink-0 text-brand-purple' />
+          <p className='max-w-3xl'>
+            {isManagerOnly &&
+              'You see cases for the people who report to you. Pay and confidential cases stay with the teams that handle them. '}
+            {hiddenPayrollCount > 0 &&
+              `${
+                hiddenPayrollCount === 1
+                  ? '1 pay case is'
+                  : `${hiddenPayrollCount} pay cases are`
+              } hidden here — only the payroll team and administrators can open them.`}
+          </p>
+        </div>
       )}
       {error && (
         <Card className='border-destructive/40'>
-          <CardContent className='p-4 text-sm text-destructive'>
+          <CardContent
+            role='alert'
+            className='p-4 text-sm text-destructive'
+          >
             {error}
           </CardContent>
         </Card>
       )}
 
+      <div className='flex flex-wrap items-baseline justify-between gap-2'>
+        <h2 className='text-lg font-semibold text-brand-navy'>
+          Cases waiting for you
+        </h2>
+        {!loading && !error && (
+          <p className='text-sm tabular-nums text-muted-foreground'>
+            {visibleCases.length}{' '}
+            {visibleCases.length === 1 ? 'case' : 'cases'}
+          </p>
+        )}
+      </div>
+
+      {/* A region that is always present, so a screen reader reliably hears
+          each change of state rather than a region appearing mid-update. */}
+      <span role='status' className='sr-only'>
+        {loading ? 'Loading the case queue' : ''}
+      </span>
+
       <div className='space-y-3'>
+        {loading && (
+          <div className='space-y-3' aria-busy='true'>
+            {Array.from({ length: 3 }).map((_, index) => (
+              <Card key={index}>
+                <CardContent className='space-y-3 p-5'>
+                  <Skeleton className='h-5 w-24' />
+                  <Skeleton className='h-4 w-56' />
+                  <Skeleton className='h-4 w-72' />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
         {visibleCases.map((item) => {
           const contextEntries = Object.entries(
             item.sanitized_context ?? {}
@@ -317,51 +415,100 @@ export default function WorkbenchPage() {
             !isManagerOnly &&
             managerState &&
             ['delivered', 'acknowledged'].includes(managerState.current_state)
+          const hasActions = Boolean(
+            canClaim ||
+              (canReview && !managerState) ||
+              canResolve ||
+              (managerState &&
+                (canAcknowledgeManager ||
+                  canCloseManagerAction ||
+                  canEscalateManager))
+          )
 
           return (
             <Card key={item.case_id}>
-              <CardContent className='space-y-4 p-5'>
-                <div className='flex flex-col justify-between gap-4 lg:flex-row lg:items-start'>
-                  <div>
-                    <div className='flex flex-wrap items-center gap-2'>
-                      <span className='rounded-full bg-brand-cornflower/15 px-2 py-1 text-xs font-semibold uppercase text-brand-navy'>
-                        {item.priority}
+              {/* One shape for every case: what happened on the left, what you
+                  can do about it in a column that starts at the same place on
+                  every card. */}
+              <CardContent className='grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_17rem]'>
+                <div className='min-w-0 space-y-3'>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-xs font-semibold uppercase ${
+                        priorityStyles[item.priority] ?? priorityStyles.low
+                      }`}
+                    >
+                      {item.priority} priority
+                    </span>
+                    <span className='text-sm text-muted-foreground'>
+                      {statusLabels[item.status]}
+                    </span>
+                    {isPayroll && (
+                      <span className='rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800'>
+                        Pay case
                       </span>
-                      <span className='text-sm text-muted-foreground'>
-                        {statusLabels[item.status]}
-                      </span>
-                      {isPayroll && (
-                        <span className='rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800'>
-                          Restricted access
-                        </span>
-                      )}
-                    </div>
-                    <h2 className='mt-2 font-semibold capitalize text-brand-navy'>
-                      {item.case_type.replaceAll('_', ' ')}
-                    </h2>
-                    <p className='mt-1 text-sm text-muted-foreground'>
-                      Employee: {item.employee_id || 'Not available'}
-                    </p>
-                    {item.recommended_action && (
-                      <p className='mt-1 text-sm text-muted-foreground'>
-                        {item.recommended_action}
-                      </p>
                     )}
-                    {managerState ? (
-                      <ManagerState state={managerState} />
-                    ) : item.case_type === 'manager_accountability' ? (
-                      <p className='mt-3 text-xs text-amber-700'>
-                        No authoritative manager action state is available for
-                        this case.
-                      </p>
-                    ) : null}
                   </div>
 
-                  <div className='flex max-w-xl flex-wrap items-center justify-end gap-2'>
+                  <div>
+                    <h3 className='font-semibold capitalize text-brand-navy'>
+                      {item.case_type.replaceAll('_', ' ')}
+                    </h3>
+                    <p className='mt-1 text-sm text-muted-foreground'>
+                      Employee {item.employee_id || 'not recorded'}
+                    </p>
+                  </div>
+
+                  {item.recommended_action && (
+                    <p className='text-sm text-foreground'>
+                      {item.recommended_action}
+                    </p>
+                  )}
+
+                  {managerState ? (
+                    <ManagerState state={managerState} />
+                  ) : item.case_type === 'manager_accountability' ? (
+                    <p className='text-xs text-amber-700'>
+                      There is no confirmed record of what the manager has done
+                      on this case yet.
+                    </p>
+                  ) : null}
+
+                  {contextEntries.length > 0 && !isPayroll && (
+                    <dl className='grid gap-x-6 gap-y-3 border-t border-border/60 pt-3 text-xs sm:grid-cols-2'>
+                      {contextEntries.map(([key, value]) => (
+                        <div key={key}>
+                          <dt className='text-muted-foreground'>
+                            {safeContextLabels[key]}
+                          </dt>
+                          <dd className='mt-0.5 break-words font-medium text-foreground'>
+                            {contextValue(key, value)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  {isPayroll && (
+                    <p className='border-t border-border/60 pt-3 text-xs text-muted-foreground'>
+                      Pay amounts and reasons are never shown here. The payroll
+                      team works this case in their own process.
+                    </p>
+                  )}
+                </div>
+
+                <div className='space-y-2 lg:border-l lg:border-border/60 lg:pl-5'>
+                  <p className='text-[11px] font-semibold uppercase tracking-widest text-muted-foreground'>
+                    What you can do
+                  </p>
+                  {!hasActions && (
+                    <p className='text-sm text-muted-foreground'>
+                      Nothing is waiting on you for this case right now.
+                    </p>
+                  )}
+                  <div className='flex flex-col gap-2 [&>button]:w-full'>
                     {canClaim && (
                       <Button
-                        variant='outline'
-                        disabled={busy === item.case_id}
+                        loading={busy === item.case_id}
                         onClick={() => action(item, 'claim')}
                       >
                         Claim case
@@ -370,65 +517,71 @@ export default function WorkbenchPage() {
                     {canReview && !managerState && (
                       <>
                         <Button
-                          variant='outline'
+                          variant='ghost'
                           disabled={busy === item.case_id}
                           onClick={() => action(item, 'acknowledge')}
                         >
-                          Record review
+                          Log a review
                         </Button>
                         <Button
                           variant='outline'
                           disabled={busy === item.case_id}
                           onClick={() => action(item, 'await_external_update')}
                         >
-                          Await update
+                          Wait for an external update
                         </Button>
                       </>
                     )}
                     {managerState && canAcknowledgeManager && (
                       <Button
-                        variant='outline'
-                        disabled={busy === item.case_id}
+                        loading={busy === item.case_id}
                         onClick={() =>
                           managerAction(managerState, 'acknowledged')
                         }
                       >
-                        Acknowledge nudge
+                        Acknowledge the nudge
                       </Button>
                     )}
                     {managerState && canCloseManagerAction && (
                       <Button
-                        variant='outline'
-                        disabled={busy === item.case_id}
+                        loading={busy === item.case_id}
                         onClick={() =>
                           managerAction(managerState, 'action_verified')
                         }
                       >
-                        Verify action
+                        Confirm the action was taken
                       </Button>
                     )}
                     {managerState && canEscalateManager && (
                       <Button
-                        variant='outline'
+                        variant='ghost'
                         disabled={busy === item.case_id}
                         onClick={() => managerAction(managerState, 'escalated')}
                       >
-                        Escalate
+                        Escalate this case
                       </Button>
                     )}
                     {canResolve && (
                       <>
                         <Select
                           value={resolutionCodes[item.case_id]}
-                          onValueChange={(value: ResolutionCode) =>
+                          onValueChange={(value: ResolutionCode) => {
+                            setCaseError(item.case_id, null)
                             setResolutionCodes((current) => ({
                               ...current,
                               [item.case_id]: value,
                             }))
-                          }
+                          }}
                         >
-                          <SelectTrigger className='w-56'>
-                            <SelectValue placeholder='Resolution code' />
+                          <SelectTrigger
+                            id={`resolution-${item.case_id}`}
+                            className='w-full'
+                            aria-label={`How the ${item.case_type.replaceAll('_', ' ')} case was resolved`}
+                            aria-invalid={
+                              caseErrors[item.case_id] ? true : undefined
+                            }
+                          >
+                            <SelectValue placeholder='How was it resolved?' />
                           </SelectTrigger>
                           <SelectContent>
                             {resolutionOptions.map((option) => (
@@ -441,48 +594,54 @@ export default function WorkbenchPage() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {/* Kept enabled: a disabled action cannot explain what
+                            is still missing. */}
                         <Button
                           loading={busy === item.case_id}
-                          disabled={!resolutionCodes[item.case_id]}
                           onClick={() => action(item, 'resolve')}
                         >
-                          Resolve
+                          Resolve case
                         </Button>
                       </>
                     )}
                   </div>
-                </div>
 
-                {contextEntries.length > 0 && !isPayroll && (
-                  <dl className='grid gap-2 border-t border-border/60 pt-3 text-xs sm:grid-cols-2 lg:grid-cols-3'>
-                    {contextEntries.map(([key, value]) => (
-                      <div key={key}>
-                        <dt className='text-muted-foreground'>
-                          {safeContextLabels[key]}
-                        </dt>
-                        <dd className='mt-0.5 break-words font-medium text-foreground'>
-                          {String(value)}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                )}
-                {isPayroll && (
-                  <p className='border-t border-border/60 pt-3 text-xs text-muted-foreground'>
-                    Payroll reasons and amounts are never shown in the standard
-                    Workbench. Use the case reference in the restricted payroll
-                    process.
-                  </p>
-                )}
+                  {canReview && !managerState && (
+                    <p className='text-xs text-muted-foreground'>
+                      Logging a review records that you looked at the case and
+                      keeps it open. Only resolving it closes the case.
+                    </p>
+                  )}
+
+                  {caseErrors[item.case_id] && (
+                    <p role='alert' className='text-sm text-destructive'>
+                      {caseErrors[item.case_id]}
+                    </p>
+                  )}
+                </div>
               </CardContent>
             </Card>
           )
         })}
-        {!error && visibleCases.length === 0 && (
+        {!loading && !error && visibleCases.length === 0 && (
           <Card>
-            <CardContent className='flex items-center gap-3 p-8 text-muted-foreground'>
-              <Icons.checkCircle className='h-5 w-5 text-emerald-600' />
-              There are no standard cases available for you to handle.
+            <CardContent className='flex items-start gap-3 p-8'>
+              <Icons.checkCircle className='mt-0.5 h-5 w-5 shrink-0 text-emerald-600' />
+              <div className='space-y-1 text-sm'>
+                <p className='font-medium text-brand-navy'>
+                  No cases are waiting for you
+                </p>
+                <p className='text-muted-foreground'>
+                  Cases land here when a reassessment finds a risk that needs a
+                  person to decide on it.
+                </p>
+                <Button asChild size='sm' variant='outline' className='mt-3'>
+                  <Link href='/runs'>
+                    Start a reassessment
+                    <Icons.arrowRight className='h-4 w-4' />
+                  </Link>
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}

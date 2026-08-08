@@ -332,13 +332,13 @@ export function CohortBottlenecksPanel({
             <p>
               {data.policy_version ? (
                 <>
-                  Policy version{' '}
+                  Policy in force{' '}
                   <span className='break-all font-mono text-foreground'>
                     {data.policy_version}
                   </span>
                 </>
               ) : (
-                <>No active policy version</>
+                <>No policy is in force right now</>
               )}{' '}
               · Analyzed at {formatMoment(data.as_of)} · Smallest reportable
               group {data.minimum_cohort_size}

@@ -1,3 +1,4 @@
+import * as React from 'react'
 import {
   LayoutDashboard,
   Settings,
@@ -87,11 +88,25 @@ import {
   Repeat,
   Flag,
   type LucideIcon,
+  type LucideProps,
 } from 'lucide-react'
 
 export type Icon = LucideIcon
 
-export const Icons = {
+/**
+ * The design system asks for thin strokes on every icon. Applying it here means
+ * a screen never mixes stroke weights, and a caller that genuinely needs a
+ * heavier stroke can still pass its own `strokeWidth`.
+ */
+function brandStroke(IconComponent: LucideIcon): LucideIcon {
+  const Branded = React.forwardRef<SVGSVGElement, LucideProps>(
+    (props, ref) => <IconComponent ref={ref} strokeWidth={1.5} {...props} />
+  )
+  Branded.displayName = `Brand(${IconComponent.displayName ?? 'Icon'})`
+  return Branded as unknown as LucideIcon
+}
+
+const lucideIcons = {
   // Navigation
   dashboard: LayoutDashboard,
   settings: Settings,
@@ -217,10 +232,11 @@ export const Icons = {
   // Misc
   repeat: Repeat,
   flag: Flag,
-
-  // Helper to enforce brand style on any raw Lucide icon if needed
-  brandStyle: {
-    strokeWidth: 1.5,
-    className: 'transition-colors',
-  },
 } as const
+
+export const Icons = Object.fromEntries(
+  Object.entries(lucideIcons).map(([name, IconComponent]) => [
+    name,
+    brandStroke(IconComponent),
+  ])
+) as Record<keyof typeof lucideIcons, LucideIcon>

@@ -324,13 +324,13 @@ export function CaseMetricsPanel({
                   <p>
                     {data.policy_version ? (
                       <>
-                        Policy version{' '}
+                        Policy in force{' '}
                         <span className='break-all font-mono text-foreground'>
                           {data.policy_version}
                         </span>
                       </>
                     ) : (
-                      <>No active policy version</>
+                      <>No policy is in force right now</>
                     )}{' '}
                     · Counted at {formatMoment(data.as_of)}
                   </p>

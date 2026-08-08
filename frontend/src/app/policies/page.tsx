@@ -1,12 +1,20 @@
 'use client'
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useSession } from 'next-auth/react'
 import apiClient from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -153,14 +161,23 @@ const statusStyles: Record<string, string> = {
   retired: 'border-slate-200 bg-slate-100 text-slate-700',
 }
 
+/** The stored value is unchanged; only the word on screen differs. */
+const statusLabels: Record<string, string> = {
+  draft: 'Draft',
+  simulated: 'Tested',
+  approved: 'Approved',
+  active: 'In force',
+  retired: 'Replaced',
+}
+
 function PolicyStatusBadge({ status }: { status: string }) {
   return (
     <span
-      className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${
+      className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-xs font-semibold ${
         statusStyles[status] ?? 'border-gray-200 bg-gray-50 text-gray-700'
       }`}
     >
-      {status}
+      {statusLabels[status] ?? status}
     </span>
   )
 }
@@ -181,7 +198,18 @@ export default function PolicyStudioPage() {
   const [summary, setSummary] = useState('')
   const [snapshot, setSnapshot] = useState('')
   const [baseVersion, setBaseVersion] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
+  /**
+   * One place reports what happened, and it says which kind of thing happened:
+   * a completed step and a refusal must never look alike or be announced alike.
+   */
+  const [notice, setNotice] = useState<{
+    tone: 'info' | 'problem'
+    text: string
+  } | null>(null)
+  const setMessage = (text: string | null) =>
+    setNotice(text ? { tone: 'info', text } : null)
+  const setProblem = (text: string) => setNotice({ tone: 'problem', text })
+  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [simulation, setSimulation] = useState<SimulationResult | null>(null)
   const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null)
@@ -191,6 +219,10 @@ export default function PolicyStudioPage() {
   const [deleteTarget, setDeleteTarget] = useState<Policy | null>(null)
   const [draftEditorOpen, setDraftEditorOpen] = useState(false)
   const [showHidden, setShowHidden] = useState(false)
+  // A simulation answers a question the reader asked, so the answer is where
+  // they are sent — it sits in the second column, below everything on a narrow
+  // screen.
+  const simulationRef = useRef<HTMLHeadingElement>(null)
 
   const fetchPolicy = useCallback(async (policy: Policy) => {
     const response = await apiClient<PolicyDetail>(
@@ -210,7 +242,7 @@ export default function PolicyStudioPage() {
         )
       } catch (error) {
         setBaseVersion(null)
-        setMessage(
+        setProblem(
           error instanceof Error
             ? `The active snapshot could not be loaded: ${error.message}`
             : 'The active snapshot could not be loaded.'
@@ -231,7 +263,7 @@ export default function PolicyStudioPage() {
       setDetailSummary(detail.change_summary)
       setDetailSnapshot(JSON.stringify(detail.config_snapshot, null, 2))
     } catch (error) {
-      setMessage(
+      setProblem(
         error instanceof Error
           ? `Policy details could not be loaded: ${error.message}`
           : 'Policy details could not be loaded.'
@@ -257,11 +289,13 @@ export default function PolicyStudioPage() {
           else setMessage('No active policy is available as a draft baseline.')
         }
       } catch (error) {
-        setMessage(
+        setProblem(
           error instanceof Error
             ? error.message
             : 'The policy list could not be loaded.'
         )
+      } finally {
+        setLoading(false)
       }
     },
     [loadSnapshot, showHidden]
@@ -304,7 +338,7 @@ export default function PolicyStudioPage() {
       setSnapshot(JSON.stringify(parsed, null, 2))
       setMessage(null)
     } catch (error) {
-      setMessage(
+      setProblem(
         error instanceof Error ? error.message : 'The snapshot JSON is invalid.'
       )
     }
@@ -326,7 +360,7 @@ export default function PolicyStudioPage() {
         'The complete reason-code registry was merged without removing other configuration.'
       )
     } catch (error) {
-      setMessage(
+      setProblem(
         error instanceof Error ? error.message : 'The snapshot JSON is invalid.'
       )
     }
@@ -356,7 +390,7 @@ export default function PolicyStudioPage() {
       setDraftEditorOpen(false)
       await load()
     } catch (error) {
-      setMessage(
+      setProblem(
         error instanceof Error ? error.message : 'The snapshot JSON is invalid.'
       )
     } finally {
@@ -380,6 +414,7 @@ export default function PolicyStudioPage() {
         setMessage(
           `Simulation completed for ${result.result.workers_evaluated} workers. No cases or notifications were created.`
         )
+        window.setTimeout(() => simulationRef.current?.focus(), 0)
       } else if (policy.status === 'simulated') {
         const result = await apiClient<{ status: string }>(
           `/api/hr/policies/${policy.version_id}/approvals`,
@@ -398,11 +433,13 @@ export default function PolicyStudioPage() {
         await apiClient(`/api/hr/policies/${policy.version_id}/activate`, {
           method: 'POST',
         })
-        setMessage('The policy version was activated atomically.')
+        setMessage(
+          'This version is now the active policy. Every check from here on is evaluated against it.'
+        )
       }
       await load()
     } catch (error) {
-      setMessage(
+      setProblem(
         error instanceof Error ? error.message : 'The policy action failed.'
       )
     } finally {
@@ -421,7 +458,7 @@ export default function PolicyStudioPage() {
       )
       await load()
     } catch (error) {
-      setMessage(
+      setProblem(
         error instanceof Error
           ? error.message
           : 'The rollback draft could not be created.'
@@ -451,7 +488,7 @@ export default function PolicyStudioPage() {
       await load()
       setMessage(`Draft ${selectedPolicy.version_id} was updated.`)
     } catch (error) {
-      setMessage(
+      setProblem(
         error instanceof Error
           ? error.message
           : 'The draft could not be updated.'
@@ -476,7 +513,7 @@ export default function PolicyStudioPage() {
       )
       await load()
     } catch (error) {
-      setMessage(
+      setProblem(
         error instanceof Error
           ? error.message
           : 'The dashboard visibility could not be changed.'
@@ -515,7 +552,7 @@ export default function PolicyStudioPage() {
       await load(deletedWasBaseline)
       setMessage(`Draft ${deletedVersion} was deleted.`)
     } catch (error) {
-      setMessage(
+      setProblem(
         error instanceof Error
           ? error.message
           : 'The draft could not be deleted.'
@@ -548,7 +585,7 @@ export default function PolicyStudioPage() {
     <div className='space-y-6'>
       <div className='flex flex-col justify-between gap-4 sm:flex-row sm:items-end'>
         <div>
-          <p className='text-sm font-medium text-brand-cornflower'>
+          <p className='text-sm font-medium text-brand-purple'>
             Governed configuration
           </p>
           <h1 className='text-display-3 font-bold tracking-tight text-brand-navy'>
@@ -566,10 +603,28 @@ export default function PolicyStudioPage() {
         )}
       </div>
 
-      {message && (
-        <Card className='border-brand-cornflower/30'>
-          <CardContent className='p-4 text-sm text-muted-foreground'>
-            {message}
+      {notice && (
+        <Card
+          className={
+            notice.tone === 'problem'
+              ? 'border-destructive/40'
+              : 'border-brand-cornflower/30'
+          }
+        >
+          <CardContent
+            role={notice.tone === 'problem' ? 'alert' : 'status'}
+            className={`flex items-start gap-3 p-4 text-sm ${
+              notice.tone === 'problem'
+                ? 'text-destructive'
+                : 'text-muted-foreground'
+            }`}
+          >
+            {notice.tone === 'problem' ? (
+              <Icons.alertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
+            ) : (
+              <Icons.info className='mt-0.5 h-4 w-4 shrink-0 text-brand-cornflower' />
+            )}
+            <span>{notice.text}</span>
           </CardContent>
         </Card>
       )}
@@ -594,6 +649,23 @@ export default function PolicyStudioPage() {
               {showHidden ? 'Hide hidden versions' : 'Show hidden versions'}
             </Button>
           </div>
+          {/* Always present, so the change of state is announced reliably. */}
+          <span role='status' className='sr-only'>
+            {loading ? 'Loading the policy versions' : ''}
+          </span>
+          {loading && (
+            <div className='space-y-3' aria-busy='true'>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Card key={index}>
+                  <CardContent className='space-y-3 p-4'>
+                    <Skeleton className='h-5 w-24' />
+                    <Skeleton className='h-4 w-64' />
+                    <Skeleton className='h-4 w-40' />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
           {policies.map((policy) => {
             const label = actionLabel(policy)
             const isHidden = Boolean(policy.hidden_at)
@@ -620,7 +692,10 @@ export default function PolicyStudioPage() {
                             type='button'
                             aria-label={`Policy actions for ${policy.version_id}`}
                             disabled={busy !== null}
-                            className='rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-slate-100 hover:text-brand-navy focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cornflower/50 disabled:pointer-events-none group-hover:opacity-100 data-[state=open]:opacity-100'
+                            /* Always visible: hiding it until hover puts
+                               "hide" and "delete draft" out of reach on a
+                               touch screen, where there is no hover. */
+                            className='rounded-md p-1.5 text-muted-foreground transition hover:bg-slate-100 hover:text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cornflower/50 disabled:pointer-events-none'
                           >
                             <Icons.moreVertical className='h-4 w-4' />
                           </button>
@@ -697,17 +772,19 @@ export default function PolicyStudioPage() {
                   <div className='flex flex-wrap items-center gap-2 border-t pt-4'>
                     <Button
                       size='sm'
-                      variant='outline'
+                      variant='ghost'
                       disabled={busy !== null}
                       onClick={() => void openPolicyDetails(policy)}
                     >
                       View details
                     </Button>
+                    {/* One action carries the card forward; the rest stay
+                        quiet, so the next step is never a guess. */}
                     {label && (
                       <Button
                         size='sm'
                         variant={
-                          policy.status === 'approved' ? 'gradient' : 'outline'
+                          policy.status === 'approved' ? 'gradient' : 'default'
                         }
                         loading={busy === policy.version_id}
                         disabled={busy !== null && busy !== policy.version_id}
@@ -733,19 +810,28 @@ export default function PolicyStudioPage() {
               </Card>
             )
           })}
-          {policies.length === 0 && (
+          {!loading && policies.length === 0 && (
             <Card>
-              <CardContent className='p-5 text-sm text-muted-foreground'>
-                No policy versions are available.{' '}
-                {!showHidden &&
-                  'Versions hidden from the dashboard are still stored; use "Show hidden versions" to review them.'}
+              <CardContent className='space-y-1 p-5 text-sm'>
+                <p className='font-medium text-brand-navy'>
+                  No policy versions to show
+                </p>
+                <p className='text-muted-foreground'>
+                  {showHidden
+                    ? 'Nothing is stored yet, hidden or otherwise.'
+                    : 'Versions hidden from the dashboard are still stored. Use “Show hidden versions” to review them.'}
+                </p>
               </CardContent>
             </Card>
           )}
         </div>
 
         <div className='space-y-3'>
-          <h2 className='text-lg font-semibold text-brand-navy'>
+          <h2
+            ref={simulationRef}
+            tabIndex={-1}
+            className='text-lg font-semibold text-brand-navy outline-none'
+          >
             Simulation result
           </h2>
           {simulation ? (
@@ -772,9 +858,9 @@ export default function PolicyStudioPage() {
                         >
                           <span className='font-mono text-xs'>{code}</span>
                           <span
-                            className={
+                            className={`tabular-nums ${
                               delta > 0 ? 'text-amber-700' : 'text-emerald-700'
-                            }
+                            }`}
                           >
                             {delta > 0 ? '+' : ''}
                             {delta}
@@ -949,14 +1035,28 @@ export default function PolicyStudioPage() {
                 </CardHeader>
                 <CardContent>
                   <form className='space-y-4' onSubmit={create}>
-                    <Input
-                      value={summary}
-                      onChange={(event) => setSummary(event.target.value)}
-                      minLength={3}
-                      placeholder='Change summary'
-                      required
-                      disabled={!canDraft || !baseVersion}
-                    />
+                    <div className='space-y-2'>
+                      <Label htmlFor='draft-change-summary'>
+                        Change summary
+                      </Label>
+                      <Input
+                        id='draft-change-summary'
+                        value={summary}
+                        onChange={(event) => setSummary(event.target.value)}
+                        minLength={3}
+                        placeholder='For example: shorten the payroll cutoff for MY'
+                        required
+                        disabled={!canDraft || !baseVersion}
+                        aria-describedby='draft-change-summary-hint'
+                      />
+                      <p
+                        id='draft-change-summary-hint'
+                        className='text-xs text-muted-foreground'
+                      >
+                        This sentence is what reviewers and the audit history
+                        see, so name what changed and why.
+                      </p>
+                    </div>
                     <div className='space-y-2'>
                       <Label htmlFor='policy-json'>
                         Complete snapshot (advanced)

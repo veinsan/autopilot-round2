@@ -39,8 +39,10 @@
     --accent: 223 54% 71%;
     --accent-foreground: 232 53% 17%;
 
-    /* Destructive */
-    --destructive: 0 84.2% 60.2%;
+    /* Destructive: deep enough to carry text on white (6.47:1) and to hold a
+       white label on a filled button (6.47:1). The former red-500 measured
+       3.76:1 in both directions, below the 4.5:1 that body text needs. */
+    --destructive: 0 73.7% 41.8%;
     --destructive-foreground: 0 0% 100%;
 
     /* Borders: Soft #E8EBF2 - Not harsh gray */

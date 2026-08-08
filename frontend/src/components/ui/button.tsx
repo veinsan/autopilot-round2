@@ -9,7 +9,8 @@ const buttonVariants = cva(
   [
     'inline-flex items-center justify-center gap-2',
     'whitespace-nowrap rounded-full text-sm font-medium',
-    'ring-offset-background transition-all duration-200',
+    'ring-offset-background duration-200',
+    'transition-[color,background-color,border-color,box-shadow,opacity,transform]',
     // Focus ring with brand color
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cornflower/50 focus-visible:ring-offset-2',
     // Disabled state
@@ -108,18 +109,25 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     ref
   ) => {
     const Comp = asChild ? Slot : 'button'
+    // A Slot takes exactly one child, so the spinner is only ever added to a
+    // real button element.
+    const showSpinner = loading && !asChild
 
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         disabled={disabled || loading}
+        aria-busy={loading || undefined}
         {...props}
       >
-        {loading ? (
+        {/* The label stays put while the request is in flight: it keeps the
+            button's accessible name and stops the row from resizing. A Slot
+            still receives exactly one child. */}
+        {showSpinner ? (
           <>
-            <Icons.loader className='h-4 w-4 animate-spin' />
-            <span className='sr-only'>Loading...</span>
+            <Icons.loader aria-hidden='true' className='h-4 w-4 animate-spin' />
+            {children}
           </>
         ) : (
           children

@@ -1,32 +1,41 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
-const Card = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn(
-      // Group for child animations
-      'group',
-      // Base: Glaze effect with gradient background
-      'rounded-2xl bg-gradient-to-b from-white to-[#F8FAFF]',
-      // Border: Double-layer effect with white border and subtle ring
-      'border border-white/60 ring-1 ring-black/[0.03]',
-      // Shadow: Glass effect with inner highlight
-      'shadow-glass',
-      // Text
-      'text-card-foreground',
-      // Transitions for smooth hover effects
-      'transition-all duration-300 ease-out',
-      // Hover: Subtle lift + accent glow effect
-      'hover:-translate-y-0.5 hover:shadow-glass-hover hover:ring-brand-cornflower/20',
-      className
-    )}
-    {...props}
-  />
-))
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  /**
+   * Opt in to hover elevation. Only a card that is itself clickable should
+   * lift: on a card that merely holds content, the movement promises an
+   * interaction that is not there.
+   */
+  interactive?: boolean
+}
+
+const Card = React.forwardRef<HTMLDivElement, CardProps>(
+  ({ className, interactive = false, ...props }, ref) => (
+    <div
+      ref={ref}
+      className={cn(
+        // Group for child animations
+        'group',
+        // Base: Glaze effect with gradient background
+        'rounded-2xl bg-gradient-to-b from-white to-[#F8FAFF]',
+        // Border: Double-layer effect with white border and subtle ring
+        'border border-white/60 ring-1 ring-black/[0.03]',
+        // Shadow: Glass effect with inner highlight
+        'shadow-glass',
+        // Text
+        'text-card-foreground',
+        // Transitions for smooth hover effects
+        'transition-[box-shadow,transform] duration-300 ease-out',
+        // Hover: Subtle lift + accent glow effect, for clickable cards only
+        interactive &&
+          'hover:-translate-y-0.5 hover:shadow-glass-hover hover:ring-brand-cornflower/20',
+        className
+      )}
+      {...props}
+    />
+  )
+)
 Card.displayName = 'Card'
 
 const CardHeader = React.forwardRef<

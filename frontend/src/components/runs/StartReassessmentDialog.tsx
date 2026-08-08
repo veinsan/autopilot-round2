@@ -88,9 +88,9 @@ export function StartReassessmentDialog({
         <DialogHeader>
           <DialogTitle>Start a reassessment</DialogTitle>
           <DialogDescription>
-            The governed onboarding and retention checks run again against the
-            current policy. Anything they find is added to the Workbench for a
-            person to review.
+            The onboarding and retention checks run again using the policy in
+            force right now. Anything they find becomes a case in the Workbench
+            for someone to decide on.
           </DialogDescription>
         </DialogHeader>
 
@@ -254,9 +254,9 @@ export function StartReassessmentDialog({
               </SelectContent>
             </Select>
             <p className='text-xs text-muted-foreground'>
-              This is a note for the audit trail, not a filter. Every governed
-              check runs either way — picking a reason does not narrow what gets
-              looked at, and leaving it blank does not skip anything.
+              This is only a note for the record. Every check runs either way —
+              choosing a reason does not narrow what is looked at, and leaving
+              it blank does not skip anything.
             </p>
           </div>
 
