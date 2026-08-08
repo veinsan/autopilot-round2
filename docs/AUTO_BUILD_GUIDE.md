@@ -1324,8 +1324,22 @@ keeping external I/O inside specialized Operators.
 
 Continue the existing ORCH-01. Do not create a new Orchestrator.
 
+INPUT CONTRACT — the Command Center sends exactly these five keys as a JSON
+object and nothing else:
+  scope, employee_id, cohort, reason_code, command_id
+There is no execution_id input key: derive execution_id from command_id, and
+when command_id is absent (scheduled or Typeform-parented runs) use the stable
+Auto run ID instead. There is no trigger_source input key either: treat the run
+as "command_center" when command_id is present and "scheduled" otherwise. Take
+as_of from config_snapshot.as_of_date of the active policy, never from the
+input. reason_code may be null; it is a filter hint, never a finding.
+Pass the derived execution_id down to every child Operator, because OP-02,
+OP-03, OP-05, OP-06, and OP-07 take employee_id and execution_id as their own
+inputs.
+
 For scope=employee:
-1. Validate the common input contract.
+1. Validate that contract: reject the run only when scope is missing, when
+   scope="employee" without employee_id, or when scope="cohort" without cohort.
 2. Start independent evaluation branches in parallel:
    - existing OP-02/OP-03 paths required by the saved Round 1 design;
    - OP-05 Compliance & Work Authorization;
@@ -1350,8 +1364,14 @@ case/notification writer.
 
 **Tests:**
 
-Field yang sama: `scope=employee`; `command_id` = sama dengan `execution_id`;
-`trigger_source=command_center`; pin `as_of_date="2026-08-03"`.
+Field yang sama: `scope=employee`. Kolom `execution_id` di tabel bawah adalah
+nilai `command_id` yang dikirim — ORCH-01 menurunkan `execution_id` darinya, dan
+`trigger_source` dideteksi sendiri, jadi keduanya **bukan** field input yang
+diisi manual. `as_of_date` diambil dari `config_snapshot` policy aktif; kalau
+sebuah baris menuntut `as_of` tertentu, pin lewat Policy Studio, bukan lewat
+input run. Jalankan dari Command Center supaya `command_id` benar-benar berasal
+dari `app/services/hr.py`; test form Auto langsung hanya sah untuk baris yang
+memang menguji jalur non-Command-Center.
 
 | # | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan |
 |---|---|---|---|---|---|
@@ -1363,6 +1383,22 @@ Field yang sama: `scope=employee`; `command_id` = sama dengan `execution_id`;
 
 ### O.2 — Command event correlation
 
+**Pembagian kepemilikan event — baca sebelum menjalankan prompt.** Command Center
+sudah menulis seluruh siklus hidup sendiri: `AutoWorkflowClient.execute_stream`
+(`app/services/auto.py`) membaca SSE Auto dan memanggil `persist_workflow_event`
+untuk tiap event `queued`/`running`/terminal. Kalau ORCH-01 ikut memancarkan
+event lifecycle, ada dua penulis pada satu state machine — `event_id`-nya
+berbeda sehingga `on conflict do nothing` tidak menolong, jumlah baris
+`workflow_events` berlipat (persis metrik test #2), dan terminal yang ditulis
+ORCH lebih dulu mengunci `command_runs` sehingga semua persist klien berikutnya
+mengembalikan `false`. Jadi: **lifecycle milik Command Center, finding milik
+ORCH-01.**
+
+`persist_workflow_event` tidak bisa dipakai untuk finding — ia menanam
+`operator_id` sebagai literal `'orchestrator'`, tidak punya parameter
+`reason_codes`, dan ikut memutasi `command_runs.status`. Untuk itu ada RPC
+terpisah `record_finding_event` yang hanya menulis ke `workflow_events`.
+
 **Prompt:**
 
 ```text
@@ -1370,28 +1406,54 @@ Goal: make ORCH-01 observable by the Command Center without exposing raw data.
 
 Continue ORCH-01.
 
-- Preserve command_id from Command Center input as execution_id.
-- Emit safe queued/running/terminal events with stable event IDs and source event
-  IDs. For Command Center runs, call the approved persist_workflow_event RPC so
-  event persistence and command status transition are atomic.
-- Emit per-Operator finding events only with registered reason codes and details
-  {"source":"auto_workflow"}. Never include REST responses or finding prose.
-- End exactly once as completed, failed, or cancelled. A cancellation request
-  prevents new downstream actions.
-- For scheduled/Typeform runs without command_id, preserve the stable Auto run ID
+- Preserve command_id from Command Center input as execution_id. For scheduled
+  or Typeform-parented runs without command_id, preserve the stable Auto run ID
   as execution_id so the FastAPI reconciler can discover and correlate the run.
+
+- Do NOT emit queued, running, or terminal lifecycle events, and do not call
+  persist_workflow_event. The Command Center already derives those from the Auto
+  SSE stream and owns the command_runs state machine. A second writer duplicates
+  the ledger and can lock the run terminal early.
+
+- Emit one finding event per Operator finding by calling the RPC
+  record_finding_event over Supabase REST. Its arguments are matched by name, so
+  send exactly these keys and no others:
+    target_command_id     the execution_id of this run
+    new_event_id          stable, unique per finding
+    new_source_event_id   stable per (execution_id, operator, reason_code,
+                          employee_id) so a replay recomputes the same value
+    operator              "OP-01".."OP-07", or "orchestrator"
+    subject_employee_id   employee this finding is about, or null
+    subject_cohort        cohort for cohort-scope runs, or null
+    safe_reason_codes     JSON array of registered reason codes
+    safe_details          exactly {"source": "auto_workflow"}
+  Both ID arguments are required. The RPC returns true when a row was inserted
+  and false when it was suppressed — because the run is already terminal,
+  because cancellation was requested, because that source event was already
+  recorded, or because no registered reason code survived filtering. A false
+  return is a normal outcome, not an error: never retry it and never raise.
+
+- Never put REST responses, finding prose, or any payroll field into
+  safe_details. The RPC drops every key except "source" and "error_type", so
+  anything else is silently lost rather than delivered.
+
+- An unregistered reason code must never be sent to record_finding_event. Route
+  it as a system exception instead, exactly as O.1 step 6 requires.
+
+- A cancellation request prevents new downstream actions: once it is set, stop
+  starting new branches and stop routing findings to OP-04.
 ```
 
 **Tests:**
 
 | # | Scenario | employee_id | execution_id | Expected output | Tindakan tambahan |
 |---|---|---|---|---|---|
-| 1 | Korelasi Command Center run | `EMP7032` | `cmd_16fc077348809fd328f874daf71be609` | Query `command_runs` dan `workflow_events` untuk `command_id`/`execution_id` ini: nilainya **identik**; urutan event `queued -> running -> completed` konsisten dengan Activity Timeline Auto | Jalankan lewat Command Center (bukan test form Auto langsung) supaya `command_id` benar-benar berasal dari `app/services/hr.py` |
-| 2 | Replay source_event_id sama | `EMP7032` | `cmd_16fc077348809fd328f874daf71be609` (**sama persis** dengan #1) | `select count(*) from "workflow_events" where execution_id=...;` jumlahnya **tidak bertambah** dibanding setelah #1 — replay tidak menambah event baru | Jalankan ulang langsung setelah #1 dengan input identik |
+| 1 | Korelasi Command Center run | `EMP7032` | `cmd_16fc077348809fd328f874daf71be609` | Query `command_runs` dan `workflow_events` untuk `command_id`/`execution_id` ini: nilainya **identik**; urutan event `queued -> running -> completed` konsisten dengan Activity Timeline Auto. Tambahan setelah pembagian kepemilikan event: setiap baris `event_type='finding'` harus punya `operator_id` yang benar-benar `OP-0x` (bukan `orchestrator`) dan `details` persis `{"source":"auto_workflow"}`; sebaliknya **tidak boleh** ada baris lifecycle dengan `operator_id` selain `orchestrator`, karena itu berarti ORCH ikut menulis lifecycle | Jalankan lewat Command Center (bukan test form Auto langsung) supaya `command_id` benar-benar berasal dari `app/services/hr.py` |
+| 2 | Replay source_event_id sama | `EMP7032` | `cmd_16fc077348809fd328f874daf71be609` (**sama persis** dengan #1) | `select count(*) from "workflow_events" where execution_id=...;` jumlahnya **tidak bertambah** dibanding setelah #1 — replay tidak menambah event baru. Dua mekanisme berbeda yang menahannya, dan keduanya harus dibuktikan: run yang sudah terminal membuat `execute_stream` gagal klaim sehingga tidak ada event lifecycle baru, dan `record_finding_event` menolak `new_source_event_id` yang sudah pernah tercatat sehingga tidak ada finding baru. Kalau jumlahnya bertambah, cek dulu `event_type` baris tambahannya untuk tahu mekanisme mana yang bocor | Jalankan ulang langsung setelah #1 dengan input identik (idempotency key sama, supaya `create_run` mengembalikan `command_id` yang sama) |
 | 3 | Reconnect SSE di tengah run | `EMP7062` (payroll, biar durasinya cukup lama untuk sempat disconnect) | `cmd_f0bbcaa278c91ecbdf908f654291825f` | Setelah reconnect ke stream SSE Command Center, event yang diterima lanjut dari nomor urut terakhir yang sudah diterima sebelum disconnect — tidak mengulang dari awal, tidak ada gap | Manual: buka halaman yang subscribe SSE, matikan koneksi jaringan sebentar di tengah run, nyalakan lagi |
 | 4 | Terminal state sekali walau sempat retry | `EMP7062` | `cmd_1ba458fa9c0d32d490bd2314b138d303` | Tepat satu event terminal (`completed`/`failed`/`cancelled`) di `workflow_events` untuk `execution_id` ini, walau salah satu Operator sempat retry beberapa kali sebelum akhirnya berhasil/gagal | Sebelum run, buat salah satu branch (mis. OP-06) gagal sekali lalu berhasil di percobaan retry berikutnya — gunakan teknik toggle env var yang sama seperti §5.3 test #3 |
 | 5 | Run terjadwal tanpa command_id | — (`trigger_source=daily_schedule`) | Tidak ada `execution_id` manual; pakai Auto run ID otomatis | `command_runs`/`workflow_events` tetap punya baris yang bisa dikorelasikan lewat Auto run ID; endpoint `POST /runs/reconcile` di Command Center bisa menemukan run ini | Trigger manual test run dari Daily Cohort Sweep (§8), bukan dari Command Center |
-| 6 | Cancellation mencegah aksi lanjutan | `EMP7062` | `cmd_ab53176b83db40ac5da36561c1bcbe52` | Setelah `cancel_requested_at` di-set, tidak ada case/notification baru yang tertulis untuk branch yang belum sempat jalan; event terminal `cancelled` tertulis sekali | Mulai run, lalu segera panggil `POST /runs/{command_id}/cancel` sebelum branch OP-06/OP-07 sempat selesai |
+| 6 | Cancellation mencegah aksi lanjutan | `EMP7062` | `cmd_ab53176b83db40ac5da36561c1bcbe52` | Setelah `cancel_requested_at` di-set, tidak ada case/notification baru yang tertulis untuk branch yang belum sempat jalan; event terminal `cancelled` tertulis sekali. Tidak ada baris `event_type='finding'` dengan `occurred_at` setelah `cancel_requested_at` — `record_finding_event` mengembalikan `false` begitu kolom itu terisi, jadi finding yang telat tidak masuk ledger meski branch-nya sudah terlanjur menghitung | Mulai run, lalu segera panggil `POST /runs/{command_id}/cancel` sebelum branch OP-06/OP-07 sempat selesai |
 
 ## 8. Daily cohort sweep parent workflow
 
@@ -1835,7 +1897,7 @@ proof. `Builder says done` is not evidence.
 | C.3 | OP-03 | Active-policy compatibility | Verified / frozen | Passed 6/6 | Latest-score semantics, recovery ordering, confidential + historical disclosure, zero-leakage sentinel, Policy Studio threshold change `5 -> 2`, and restore to baseline all verified. |
 | 4.R2.1 | OP-04 | Round 2 routing/grouped cases | Saved | Partial | Compliance, payroll, unknown code, and dedup passed. Next: five OP-07 routes, cohort insight-only, reopen/CLEAR lifecycle, confidential independence, then freeze. |
 | 4.R2.2 | OP-04 | Confidential independence | Not started | Not started | Required before final privacy acceptance. |
-| O.1 | ORCH-01 | Parallel fan-out/merge/handoff | Not started | Not started | Next major build after Operator regressions/routing. |
-| O.2 | ORCH-01 | Command/event correlation | Not started | Not started | Depends on O.1 and G-04. |
+| O.1 | ORCH-01 | Parallel fan-out/merge/handoff | Not started | Not started | Next major build after Operator regressions/routing. Prompt direvisi 2026-08-08 dengan kontrak input sebenarnya dari `app/routers/hr.py`: hanya lima key (`scope`, `employee_id`, `cohort`, `reason_code`, `command_id`); `execution_id` dan `trigger_source` diturunkan sendiri, `as_of_date` dari `config_snapshot`. |
+| O.2 | ORCH-01 | Command/event correlation | Not started | Not started | Depends on O.1 and G-04. Prompt direvisi 2026-08-08: lifecycle tetap milik Command Center (`AutoWorkflowClient.execute_stream`), ORCH hanya menulis finding lewat RPC baru `record_finding_event`. RPC itu harus sudah di-apply ke Supabase sebelum test O.2 dijalankan. |
 | S.1 | Daily Sweep | Schedule/fan-out/cohort aggregation | Not started | Not started | Depends on ORCH-01 and verified OP-07 cohort mode. |
 | E2E | All | Live acceptance rehearsal | Not started | Not started | Policy change → Auto → OP-04 → human Workbench → Dashboard/audit evidence. |
