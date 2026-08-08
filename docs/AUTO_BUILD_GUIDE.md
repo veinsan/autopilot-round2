@@ -1477,14 +1477,23 @@ the source of truth; builder summaries are not accepted when they disagree.
 
 - The additive Supabase schema, Keycloak setup, payroll RBAC, manager-action
   state contract, and Command Center UI gates remain passed.
-- Exactly one policy was active at the latest check:
-  `policy_9ccde26035e0415da4291cabe210868a`, parent
-  `policy_round2_v1`, `change_summary="Rollback candidate from policy_round2_v1"`,
-  config version `2.0`, and `demo_mode=false`.
-- Earlier evidence under `policy_a9c97994724541148b8697ad8ccc64f8` and
-  `policy_29dfdf8bbb3441d0aa758b2b020773fe` remains valid historical evidence,
-  but final integration smoke tests must use the policy active at rehearsal
-  time.
+- Exactly one policy is active at the latest day-H check:
+  `policy_15a51b4e58cc4400a8a63ceb49b3cf92`, parent `policy_round2_v1`,
+  `change_summary="Rollback candidate from policy_round2_v1"`, and
+  `demo_mode=false`.
+- Direct Policy Studio / SQL evidence on 2026-08-08 confirms the active snapshot
+  also has `manager_max_reminders={"default":2}`,
+  `bottleneck_min_workers=2`, `bottleneck_min_percent=25`, and 18 registered
+  reason codes. The observed count is evidence for this version only; runtime
+  validation must remain non-empty-registry + engineering-registry parity, not
+  a permanent `reason_code_count == 18` check.
+- Earlier evidence under `policy_a9c97994724541148b8697ad8ccc64f8`,
+  `policy_29dfdf8bbb3441d0aa758b2b020773fe`,
+  `policy_9ccde26035e0415da4291cabe210868a`,
+  `policy_ed6b6c30a7594a7a8efd4ba9b82eb268`, and the temporary OP-03/OP-01
+  policy-test versions remains valid historical evidence. Final integration
+  smoke tests must use whichever policy is active at rehearsal time; re-query
+  immediately before every test block.
 - `thresholds.manager_max_reminders` is currently structured as
   `{"default":2}`; Operators must accept the object shape as well as a direct
   scalar where the contract permits it.
@@ -1596,32 +1605,56 @@ Remaining OP-04 work:
 
 ### OP-01, OP-02, and OP-03 compatibility migration
 
-- A teammate reports that the active-policy compatibility amendments have been
-  applied to OP-01, OP-02, and OP-03.
-- These changes are **not yet accepted as verified**. No saved-builder summary is
-  sufficient by itself; run the essential live regression tables and inspect
-  Activity Timeline plus `policy_evaluations`.
-- Priority order for evidence:
-  1. OP-02 boundary pair proving `as_of_date` is read from the active policy;
-  2. OP-03 latest-score/disclosure/privacy sentinel behavior;
-  3. OP-01 create/update/middle-band/ambiguous-manager behavior and one policy
-     threshold-change proof.
+- **OP-01:** teammate completed all five essential live tests on 2026-08-08.
+  Clean create, name-variant update, middle-band escalation, ambiguous-manager
+  halt, and threshold-change proof all passed. The threshold-change pair used
+  identical payloads under different active policy versions, so it is valid
+  migration evidence. One remaining OP-01 defect is still relevant to final E2E:
+  a stale Date Parsing canvas edge also raises a spurious escalation after a
+  successful parse, leaving runs in `awaiting_human_input` instead of a clean
+  terminal state. Business decisions and persisted rows are correct; fix this
+  edge before the final rehearsal.
+- **OP-02:** accepted as verified. Live EMP7000 regression produced all four
+  expected reasons under the active policy, semantic `policy_key` values were
+  persisted, deterministic evaluation IDs were proven, full policy snapshot
+  logging was sanitized, and the normalized final envelope contains
+  `confidence=1.0` and `system_exceptions=[]`. Freeze OP-02 unless ORCH
+  integration exposes a regression.
+- **OP-03:** accepted as fully verified and frozen. Tests proved:
+  latest-semantic-milestone scoring (`EMP7046`), recovery ordering (`EMP7021`),
+  confidential disclosure (`EMP7003`), historical disclosure surviving a newer
+  healthy survey (`EMP7090`), zero-leakage sentinel behavior, and active-policy
+  behavior change through Policy Studio (`engagement_low_score 5 -> 2`) followed
+  by a successful restore to baseline. Raw Activity Timeline and direct
+  `policy_evaluations` queries were used as evidence; builder summaries were
+  ignored when they disagreed.
+- OP-03 also established an end-to-end policy-control proof:
+  Policy Studio -> immutable `policy_versions` snapshot -> Auto policy fetch ->
+  changed deterministic rule outcome without editing the Operator.
 
 ### Current critical path for the next session
 
-1. Verify OP-01/02/03 migrations with a minimal high-value regression set; do
-   not rebuild unless raw evidence fails.
-2. Finish OP-04 routing for all OP-07 reason codes, including cohort insight-only
-   behavior.
-3. Verify OP-04 lifecycle: reopen after human resolution, CLEAR does not close,
-   and confidential/standard independence.
-4. Run one current-policy regression for OP-05 and OP-06, then freeze the
-   detector contracts.
-5. Build/test ORCH-01 parallel fan-out, deterministic merge, branch-failure
-   isolation, and OP-04 handoff.
-6. Complete G-04 workflow UUID mapping and command/event correlation.
-7. Build/test the Daily Cohort Sweep.
-8. Run the live acceptance rehearsal and capture screenshots/query evidence.
+1. Finish OP-04 routing for the five OP-07 outputs:
+   `DAY_ONE_DEPENDENCY_BLOCKED`, `LEARNING_MILESTONE_OVERDUE`,
+   `MANAGER_ACKNOWLEDGMENT_OVERDUE`, `MANAGER_ACTION_OVERDUE`, and
+   `COHORT_DEPENDENCY_BOTTLENECK`.
+2. Prove OP-04 cohort behavior is insight/audit-only, then finish lifecycle:
+   recurring risk reopens the same case, CLEAR never auto-closes, and
+   confidential + standard findings proceed independently.
+3. Remove any temporary exact `reason_code_count == 18` validation in OP-04 and
+   keep only non-empty active-policy / engineering-registry parity.
+4. Run one current-policy smoke regression each for OP-05 and OP-06, then freeze
+   both detector contracts.
+5. Teammate: fix OP-01's stale Date Parsing success/escalation canvas edge so a
+   successful submission can reach a clean terminal state before E2E.
+6. Build/test ORCH-01 parallel fan-out, deterministic merge, branch-failure
+   isolation, confidential separation, dedup, and OP-04 handoff.
+7. Complete G-04 server-side workflow UUID mapping and Command Center event
+   correlation (`command_id == execution_id`, queued/running/terminal).
+8. Build/test the Daily Cohort Sweep.
+9. Run the live acceptance rehearsal:
+   Policy Studio -> Command Center -> ORCH -> Operators -> OP-04 ->
+   Workbench/Slack -> human claim/resolve -> Dashboard/audit evidence.
 
 Low-priority/defer-until-after-core items:
 
@@ -1709,6 +1742,73 @@ essentials. Fix opportunistically.
   `jsonb` column and use `PASS`/`SKIP`/`FAIL` vocabulary instead of lowercase
   `clear`.
 
+## 9.3 Day-H handoff — 2026-08-08
+
+This is the operative checkpoint for the on-site build day. It supersedes older
+"not tested" labels elsewhere in the document when those labels conflict with
+the evidence below.
+
+### Active policy at handoff
+
+Direct SQL / Policy Studio evidence:
+
+```text
+version_id = policy_15a51b4e58cc4400a8a63ceb49b3cf92
+demo_mode = false
+manager_max_reminders = {"default":2}
+bottleneck_min_workers = 2
+bottleneck_min_percent = 25
+reason_code_count = 18
+```
+
+`policy_15a51b4e58cc4400a8a63ceb49b3cf92` is derived from
+`policy_round2_v1`. Re-query before every OP-04/ORCH test because teammates may
+activate a temporary policy for a proving run.
+
+### Frozen / accepted Operators
+
+- OP-02: verified and frozen.
+- OP-03: tests 1–6 fully verified and frozen, including zero-leakage sentinel
+  and Policy Studio threshold-change proof.
+- OP-05: core + failure behavior verified; one current-policy smoke remains.
+- OP-06: detector-only core + idempotency verified; one current-policy smoke
+  remains.
+- OP-07: employee, cohort, and manager-accountability core verified; true result
+  pagination remains deferred technical debt.
+
+### OP-01 teammate handoff
+
+All five essential migration tests passed live. Remaining blocker is not the
+dedup/business decision path; it is the stale Date Parsing canvas edge that
+also raises an escalation after a successful parse. Fix the edge and prove one
+clean terminal run before final E2E.
+
+### OP-04 handoff
+
+Already verified:
+- compliance canonical case + no manager Slack;
+- restricted payroll canonical case + sanitized context;
+- unknown-code system-exception route + dedup.
+
+Still required:
+- five OP-07 reason-code routes;
+- cohort insight/audit-only behavior;
+- reopen same case after human resolution;
+- CLEAR never auto-closes;
+- confidential + standard independence;
+- registry parity without a hard-coded count.
+
+### Coordination rule for parallel work
+
+Parallel work is allowed as long as teammates do not:
+- edit the same Auto workflow simultaneously;
+- activate temporary policies without announcing it;
+- assume an older policy ID is still active.
+
+Every test block starts by re-querying the active policy, and raw Activity
+Timeline + direct Supabase rows remain the source of truth.
+
+
 ## 10. Build status tracker
 
 Update this table only from raw Activity Timeline and direct database/API
@@ -1716,7 +1816,7 @@ proof. `Builder says done` is not evidence.
 
 | ID | Workflow | Build step | Build | Tests | Evidence / notes |
 |---|---|---|---|---|---|
-| G-01 | Policy Studio | Active Round 2 policy | Done | Passed | Latest observed active version: `policy_9ccde26035e0415da4291cabe210868a`, config `2.0`, `demo_mode=false`. Re-query before every test block. |
+| G-01 | Policy Studio | Active Round 2 policy | Done | Passed | Day-H active version: `policy_15a51b4e58cc4400a8a63ceb49b3cf92`, derived from `policy_round2_v1`; `demo_mode=false`, manager cap `{"default":2}`, bottleneck `2/25`, 18 observed codes. Re-query before every test block. |
 | G-02 | Command Center | Restricted payroll RBAC | Done | Passed | Admin/payroll-reviewer login and restricted payroll visibility verified. |
 | G-03 | Command Center | Manager action-state contract | Done | Passed | Live table/RPC contract and manager state fixtures verified. |
 | G-04 | Runtime config | Published workflow UUID mapping | Not started / unverified | Not started | Required before ORCH-01 publish and Command Center production invocation. |
@@ -1731,9 +1831,9 @@ proof. `Builder says done` is not evidence.
 | 7.2 | OP-07 | Cohort bottlenecks | Core verified | Passed core; pagination blocked | Security 14/19, complete safe metadata/evidence, four team audit rows. True result pagination remains technical debt. |
 | 7.3 | OP-07 | Manager accountability | Done | Passed + post-rebuild smoke | `EMP7009`/`CASE-73-01`: one overdue finding, eight rows, no false escalation. |
 | C.1 | OP-01 | Active-policy compatibility | Rebuilt, verified | **Passed 5/5** | Runs `019fdd92-e3a5` … `019fdd95-34b4`, 2026-08-07 18:53–18:56; see §9.2 for the per-test table. Migration proof is the #3/#5 pair: identical payload, `…f5384757` escalates and `…03a4d111` updates. Caveat: a stale Date Parsing branch condition also raises a spurious escalation, so runs end `awaiting_human_input` instead of `completed`; decisions and persisted rows unaffected, fix pending. Remaining §9.2 items are optional. |
-| C.2 | OP-02 | Active-policy compatibility | Updated by teammate | Not tested | Boundary `as_of_date` pair is mandatory evidence. |
-| C.3 | OP-03 | Active-policy compatibility | Updated by teammate | Not tested | Latest-score, disclosure scan, and privacy sentinel are mandatory evidence. |
-| 4.R2.1 | OP-04 | Round 2 routing/grouped cases | Saved | Partial | Compliance, payroll, unknown code, and dedup passed. All OP-07 routes and lifecycle remain. |
+| C.2 | OP-02 | Active-policy compatibility | Verified / frozen | Passed | EMP7000 four-reason regression, semantic policy keys, deterministic audit IDs, safe policy logging, and normalized `confidence=1.0` / `system_exceptions=[]` contract verified from raw Timeline + SQL. |
+| C.3 | OP-03 | Active-policy compatibility | Verified / frozen | Passed 6/6 | Latest-score semantics, recovery ordering, confidential + historical disclosure, zero-leakage sentinel, Policy Studio threshold change `5 -> 2`, and restore to baseline all verified. |
+| 4.R2.1 | OP-04 | Round 2 routing/grouped cases | Saved | Partial | Compliance, payroll, unknown code, and dedup passed. Next: five OP-07 routes, cohort insight-only, reopen/CLEAR lifecycle, confidential independence, then freeze. |
 | 4.R2.2 | OP-04 | Confidential independence | Not started | Not started | Required before final privacy acceptance. |
 | O.1 | ORCH-01 | Parallel fan-out/merge/handoff | Not started | Not started | Next major build after Operator regressions/routing. |
 | O.2 | ORCH-01 | Command/event correlation | Not started | Not started | Depends on O.1 and G-04. |

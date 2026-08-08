@@ -488,3 +488,95 @@ credentials or confidential payloads.
   identifiers-and-counts only. Rows written by separate steps of one run cannot
   be proven to belong to that run when each step names the run differently.
 
+## Auto Studio / Policy Studio live lessons — 2026-08-08 (OP-03 + day-H)
+
+### Commit after each verified Auto fix before opening a fresh chat
+
+- Mistake: stacking several unsaved fixes in one builder chat and then opening a
+  fresh chat for the next defect. Fresh chats start from the last committed
+  Operator version, not from another chat's unsaved draft, so a working privacy
+  or contract fix can disappear silently.
+- Prevention: one defect -> one complete-step rebuild -> one discriminating
+  test in the same chat -> raw Timeline / SQL verification -> save/commit ->
+  fresh chat for the next defect. "Fresh chat" means fresh context, not a new
+  workflow.
+
+### My Operators and builder chat can execute different versions
+
+- Mistake: assuming a run from My Operators validates the current in-chat draft.
+  My Operators executes the saved/committed version, while the builder chat can
+  execute an unsaved draft.
+- Prevention: while validating an unsaved fix, rerun from that same builder
+  chat. Only use My Operators after committing the verified checkpoint.
+
+### Builder summaries can invent runs, IDs, thresholds, and outcomes
+
+- Mistake: accepting generated summaries that claimed four employees had been
+  tested, reported synthetic execution IDs, or echoed stale policy values even
+  though direct `policy_evaluations` rows showed only one real employee run and
+  the raw Timeline showed different values.
+- Prevention: treat the summary as narration only. Accept a test only from raw
+  Activity Timeline plus direct database evidence. If the workflow form does
+  not accept `execution_id`, never expect a hand-written `cmd_*` value to appear
+  in persistence; use the real Auto run UUID.
+
+### Verify step responsibilities, not only the final envelope
+
+- Mistake: a rebuild produced the correct final result while the steps named
+  `Fetch Worker Data and Timezone` and `Fetch Engagement Data` were wired to
+  each other's outputs. The final envelope looked healthy because both datasets
+  still existed.
+- Prevention: after a multi-step rebuild, inspect each step's raw output for its
+  intended responsibility. A correct final answer does not prove the pipeline
+  wiring is correct.
+
+### Milestone semantics must be explicit when dates disagree
+
+- Mistake: selecting the "latest" engagement score by `Submitted_At` caused
+  EMP7021's Day 30 score to override Day 60 because the Day 30 row happened to
+  have a later submission date.
+- Prevention: encode the business order explicitly (`Day 7 < Day 30 < Day 60 <
+  Day 90`) and use submission time only as a tie-breaker within the same
+  milestone. Historical disclosure scanning remains independent and must scan
+  all comments.
+
+### Privacy verification needs a sentinel plus persistence scans
+
+- Prevention: prove "no leakage" with a temporary unique sentinel in the source,
+  then check Activity Timeline, standard outputs, `policy_evaluations`, and
+  `workflow_events` for zero occurrences. Restore the source fixture
+  immediately and verify the marker is gone. Routine comments being hidden is
+  necessary but not sufficient evidence.
+
+### Use Policy Studio for policy-behavior proofs
+
+- Prevention: when proving that a rule is truly version-policy driven, make the
+  controlled threshold change through Policy Studio's immutable lifecycle
+  (draft -> simulate -> approve -> activate), then rerun the unchanged Operator
+  and verify both the new threshold and new `policy_version_id` in raw runtime
+  evidence. This proves the web control plane is real, not decorative.
+
+### "Create rollback draft" clones the selected snapshot
+
+- Mistake: clicking rollback on the currently active temporary test policy was
+  expected to restore its parent, but the generated draft cloned the selected
+  policy and therefore kept the test threshold.
+- Prevention: create the rollback draft from the historical version whose
+  snapshot you actually want to restore. Open the new draft's full snapshot and
+  confirm the target threshold before simulate/approve/activate.
+
+### Parallel teammate work requires policy coordination
+
+- Prevention: teammates may work on different Operators in parallel, but only
+  one person should change the active policy at a time. Announce every temporary
+  policy activation, and re-query the active policy immediately before each
+  test block. Never carry an expected policy ID from a previous session into a
+  new run.
+
+### Observed registry size is evidence, not a contract
+
+- Prevention: the day-H active policy currently contains 18 registered reason
+  codes, but runtime validation must never hard-code `== 18`. Require a
+  non-empty active-policy registry and parity with the engineering registry so
+  future approved additions do not break routing.
+
